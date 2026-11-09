@@ -13,7 +13,7 @@ url="https://github.com/WhitePeace36/ananicy-cpp"
 license=('GPL-3.0-or-later')
 depends=(fmt spdlog systemd-libs libelf zlib libbpf)
 makedepends=(git cmake ninja clang nlohmann-json bpf)
-optdepends=('cachyos-ananicy-rules: CachyOS rules')
+optdepends=('ananicy-rules-custom: rules, types and cgroups from github.com/WhitePeace36/ananicy-rules')
 provides=(ananicy-cpp)
 conflicts=(ananicy-cpp)
 
