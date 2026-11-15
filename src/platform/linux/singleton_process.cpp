@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstring>
 #include <fcntl.h> /* For O_* constants */
+#include <sys/file.h> /* flock */
 #include <sys/ipc.h>
 #include <sys/mman.h>
 #include <sys/shm.h>
@@ -43,16 +44,29 @@ SingletonProcess::~SingletonProcess() {
 
 bool SingletonProcess::try_create() noexcept {
   const mode_t unix_perm = 0644;
-  m_mode = O_RDWR | O_CREAT | O_EXCL;
+  // No O_EXCL: the file may be left over from an instance that was killed
+  // (SIGKILL, OOM killer, crash) before it could remove it. Whether another
+  // instance is running is decided by the lock below, which the kernel drops
+  // when its holder dies, so a stale file no longer blocks every restart.
+  m_mode = O_RDWR | O_CREAT;
 
-  // Try to create shared memory
   m_handle = shm_open(m_filename.data(), m_mode, unix_perm);
   if (m_handle == -1) {
-    if (errno != EEXIST)
-      spdlog::error(fmt::format("Could not create: {}",
-                                std::string_view{std::strerror(errno)}));
+    spdlog::error(fmt::format("Could not create: {}",
+                              std::string_view{std::strerror(errno)}));
     return false;
   }
+
+  if (::flock(m_handle, LOCK_EX | LOCK_NB) != 0) {
+    if (errno != EWOULDBLOCK) {
+      spdlog::error(fmt::format("Could not lock: {}",
+                                std::string_view{std::strerror(errno)}));
+    }
+    ::close(m_handle);
+    m_handle = -1;
+    return false; // held by a running instance
+  }
+
   // If successful change real permissions
   ::fchmod(m_handle, unix_perm);
   return true;
@@ -71,6 +85,16 @@ bool SingletonProcess::try_open() noexcept {
   m_handle = shm_open(m_filename.data(), m_mode, unix_perm);
   if (m_handle == -1) {
     spdlog::error(fmt::format("Could not open: {}", std::strerror(errno)));
+    return false;
+  }
+
+  // The file alone does not mean an instance is running (it can be left
+  // over from a killed one): a running instance holds an exclusive lock.
+  if (::flock(m_handle, LOCK_SH | LOCK_NB) == 0) {
+    ::flock(m_handle, LOCK_UN);
+    ::close(m_handle);
+    m_handle = -1;
+    spdlog::error("No running instance holds {}", m_filename);
     return false;
   }
   return true;

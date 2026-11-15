@@ -206,7 +206,11 @@ int main(const int argc, const char **argv) {
     }
     std::exit(EXIT_SUCCESS);
   } else {
+    // Do not fall through to "start": a typo (e.g. "show rules" instead of
+    // "dump rules") would otherwise launch a second daemon.
     spdlog::critical("Unknown action requested: {}", action.value());
+    parser.print_help();
+    std::exit(EXIT_FAILURE);
   }
 
   // Check if we have sufficient permission for the requested operation

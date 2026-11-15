@@ -9,7 +9,7 @@
 #include "utility/regex_utils.hpp"
 #endif
 
-#include <algorithm>   // for all_of, any_of
+#include <algorithm>   // for all_of, any_of, sort
 #include <filesystem>  // for path, recursive_directory_iterator
 #include <fstream>     // for ifstream
 #include <iostream>    // for cout
@@ -108,9 +108,19 @@ bool Rules::load_rule_from_string(const std::string_view &line) {
 
     if (has_name) { /* Program rule */
       const auto &rule_name = rule["name"];
+      if (m_program_rules.contains(rule_name)) {
+        note_definition("name", rule_name);
+      } else {
+        note_definition("", "name:" + rule_name.get<std::string>());
+      }
       m_program_rules.insert_or_assign(rule_name, rule);
 
 #ifdef ENABLE_REGEX_SUPPORT
+      // A redefinition replaces the old regex too, instead of adding a second
+      // entry that still points at the same (now replaced) rule.
+      std::erase_if(m_regex_rules, [&](const auto &entry) {
+        return entry.first == rule_name.get<std::string>();
+      });
       if (rule.contains("name_regex") && rule["name_regex"].is_string()) {
         m_regex_rules.emplace_back(rule_name,
                                    rule["name_regex"].get<std::string>());
@@ -119,10 +129,20 @@ bool Rules::load_rule_from_string(const std::string_view &line) {
     } else if (rule.contains("type") &&
                rule["type"].is_string()) { /* Type rule */
       const auto &rule_type = rule["type"];
+      if (m_type_rules.contains(rule_type)) {
+        note_definition("type", rule_type);
+      } else {
+        note_definition("", "type:" + rule_type.get<std::string>());
+      }
       m_type_rules.insert_or_assign(rule_type, rule);
     } else if (rule.contains("cgroup") &&
                rule["cgroup"].is_string()) { /* Cgroup rule */
       const auto &rule_cgroup = rule["cgroup"];
+      if (m_cgroup_rules.contains(rule_cgroup)) {
+        note_definition("cgroup", rule_cgroup);
+      } else {
+        note_definition("", "cgroup:" + rule_cgroup.get<std::string>());
+      }
       m_cgroup_rules.insert_or_assign(rule_cgroup, rule);
     } else {
       spdlog::error(
@@ -139,7 +159,25 @@ bool Rules::load_rule_from_string(const std::string_view &line) {
   return true;
 }
 
+void Rules::note_definition(std::string_view kind, const std::string &key) {
+  const std::string here =
+      m_current_source.empty() ? std::string{"<string>"} : m_current_source;
+  if (kind.empty()) { // first definition: remember where it came from
+    m_rule_sources[key] = here;
+    return;
+  }
+  const std::string full_key = fmt::format("{}:{}", kind, key);
+  const auto        previous = m_rule_sources.find(full_key);
+  spdlog::warn("{} rule '{}' from {} replaces the one from {} (the last one "
+               "loaded wins)",
+               kind, key, here,
+               previous != m_rule_sources.end() ? previous->second
+                                                : std::string{"<unknown>"});
+  m_rule_sources[full_key] = here;
+}
+
 void Rules::load_rules_from_file(const fs::path &path) {
+  m_current_source = path.string();
   std::string   line{};
   std::ifstream rule_file{path};
   while (rule_file.good()) {
@@ -150,6 +188,7 @@ void Rules::load_rules_from_file(const fs::path &path) {
     }
     load_rule_from_string(line);
   }
+  m_current_source.clear();
 }
 
 void Rules::show_all_rules() const noexcept {
@@ -205,6 +244,10 @@ void Rules::load_rules_from_directory(const fs::path &dir_path) {
             (config_ref->rule_load() && file_ext.compare(".rules") == 0));
   };
 
+  // Load in sorted path order (00-default/... before 99-local/...), not in
+  // the arbitrary order the filesystem returns entries: when a rule is
+  // defined twice the last one loaded wins, so the order must be predictable.
+  std::vector<fs::path> files;
   for (const auto &dir_entry : fs::recursive_directory_iterator{dir_path}) {
     if (fs::is_directory(dir_entry)) {
       spdlog::debug(fmt::format("Scanning directory {}",
@@ -212,9 +255,13 @@ void Rules::load_rules_from_directory(const fs::path &dir_path) {
       continue;
     }
 
-    if (is_valid_file(m_config, std::move(dir_entry.path().extension()))) {
-      load_rules_from_file(dir_entry.path());
+    if (is_valid_file(m_config, dir_entry.path().extension())) {
+      files.push_back(dir_entry.path());
     }
+  }
+  std::sort(files.begin(), files.end());
+  for (const auto &file : files) {
+    load_rules_from_file(file);
   }
 }
 

@@ -1,9 +1,11 @@
 #include "netlink_program_utils.h"
 
+#include <linux/capability.h>
 #include <linux/cn_proc.h>
 #include <linux/connector.h>
 #include <linux/netlink.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include <time.h>
@@ -21,6 +23,21 @@ struct ananicy_cpp_netlink {
     };
   } nl_cn_msg;
 };
+
+/* Without CAP_NET_ADMIN the kernel accepts the socket, the bind and the
+ * PROC_CN_MCAST_LISTEN request, but silently never sends any event: the daemon
+ * would look healthy while matching nothing but its startup scan. */
+static bool has_cap_net_admin(void) {
+  struct __user_cap_header_struct header = {
+      .version = _LINUX_CAPABILITY_VERSION_3,
+      .pid = 0,
+  };
+  struct __user_cap_data_struct data[_LINUX_CAPABILITY_U32S_3] = {};
+  if (syscall(SYS_capget, &header, data) != 0)
+    return true; /* cannot tell: let the kernel decide */
+  return (data[CAP_TO_INDEX(CAP_NET_ADMIN)].effective &
+          CAP_TO_MASK(CAP_NET_ADMIN)) != 0;
+}
 
 int32_t connect_netlink_socket() {
   int32_t nl_sock = socket(PF_NETLINK, SOCK_DGRAM, NETLINK_CONNECTOR);
@@ -81,6 +98,14 @@ ananicy_cpp_netlink_t* initialize_netlink_program() {
     perror("initialize_netlink_program");
     return NULL;
   }
+  if (!has_cap_net_admin()) {
+    fprintf(stderr, "netlink: CAP_NET_ADMIN is required to receive process "
+                    "events (run as root, or grant it to the service)\n");
+    free(obj);
+    errno = EPERM;
+    return NULL;
+  }
+
   obj->nl_sock = connect_netlink_socket();
   if (obj->nl_sock < 0) {
     free(obj);

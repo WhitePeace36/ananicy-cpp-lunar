@@ -22,6 +22,7 @@ list(APPEND test_SOURCES
         ${CMAKE_SOURCE_DIR}/src/platform/linux/process_info.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/linux/mounts.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/linux/process.cpp
+        ${CMAKE_SOURCE_DIR}/src/platform/linux/singleton_process.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/linux/cpuset.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/linux/sysfs.cpp
         ${CMAKE_SOURCE_DIR}/src/platform/linux/topology.cpp

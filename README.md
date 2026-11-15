@@ -77,6 +77,25 @@ The effects are mainly on the default compiler flags `ananicy-cpp` is built with
 - `BPF_BUILD_LIBBPF:BOOL`: Build libbpf instead of using system libary,
 - `STATIC:BOOL`: Build a static binary,
 
+#### How processes are detected
+
+At startup ananicy-cpp scans `/proc` once and applies the rules to every running process.
+After that it reacts to process events (start, `exec`, rename) from one of two listeners,
+chosen at build time with `USE_BPF_PROC_IMPL`:
+
+- **BPF** (default): hooks the kernel's fork, exec and rename tracepoints. Needs a kernel
+  with BTF.
+- **netlink proc connector** (`-DUSE_BPF_PROC_IMPL=OFF`): works on older or minimal kernels.
+  It needs `CAP_NET_ADMIN`. Root has it unless it was taken away (a container, or
+  `CapabilityBoundingSet=` in the unit). Without it the kernel silently sends no events,
+  so ananicy-cpp checks for it at startup and refuses to start without it.
+
+Both need the daemon to run as root.
+
+If events are lost because the daemon could not keep up (thousands of processes started at
+once), it logs `process events dropped` / `Lost ... process events` and scans `/proc` again
+(at most once per second), so the processes started in that window still get their rules.
+
 #### Building
 
 In order to actually build `ananicy-cpp`, open a terminal,
@@ -119,6 +138,33 @@ systemctl (stop|disable) ananicy-cpp.service
 ```
 You can have more information in `systemd`'s man page (`man systemd` on Linux)
 
+#### Commands
+
+| Command | What it does |
+|---------|--------------|
+| `ananicy-cpp start` | Run the daemon (this is what the service does). Needs root. |
+| `ananicy-cpp dump rules` | Print all rules as JSON, with their `type` merged in. `cmdline_contains` rules are listed as `name [cmdline: [...]]`. |
+| `ananicy-cpp dump types` / `dump cgroups` | Print the loaded types / cgroup definitions. |
+| `ananicy-cpp dump proc` / `dump autogroup` | Print what ananicy-cpp sees for every running process / the autogroups. |
+| `ananicy-cpp debug cgroups` | Print cgroup diagnostics for bug reports. |
+| `ananicy-cpp --reload` | Ask the running daemon to reload its configuration. Fails (exit status 1) if no daemon is running. |
+| `ananicy-cpp --version` / `--help` | Version / usage. |
+
+An unknown command (e.g. `ananicy-cpp show rules`) prints the usage and exits with
+status 1. It never starts the daemon.
+
+#### Single instance and crashes
+
+Only one daemon runs at a time. It holds a lock on `/dev/shm/AnanicyCppMutex`; a second
+`start` exits with "Ananicy Cpp is already running!". The lock belongs to the running
+process, so the kernel releases it when the daemon dies in any way (`kill -9`, the OOM
+killer, a crash). The leftover file then does not block the next start, and
+`Restart=always` in the service brings the daemon back on its own.
+
+`ananicy-cpp --force-remove-semaphore` deletes that file. It is only needed for versions
+before this change. Do not run it while the daemon is running, because a second instance
+could then start next to it.
+
 ### Distro-specific
 #### Arch-based distros
 
@@ -137,7 +183,7 @@ Format is `key=value`, one per line.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `check_freq` | `60` | Full process scan interval in seconds |
+| `check_freq` | `60` | How often the main loop wakes up, in seconds. With `--manual-scanning`, a full `/proc` scan runs every `check_freq` seconds. Without it, process events are used and there is no periodic scan (see "How processes are detected") |
 | `apply_nice` | `true` | Apply nice values from rules |
 | `apply_sched` | `true` | Apply scheduling policy from rules |
 | `apply_ionice` | `true` | Apply I/O nice values from rules |
@@ -213,6 +259,24 @@ Or to pin to specific cores directly:
 
 You can then (re)start `ananicy-cpp.service`.
 
+#### Load order and duplicate rules
+
+All `.rules`, `.types` and `.cgroups` files below the configuration directory
+(subdirectories included) are loaded in **sorted path order**. `00-default/…` loads
+before `50-community/…`, which loads before `99-local.rules`. Lines within a file are
+read top to bottom.
+
+If the same `name`, `type` or `cgroup` is defined more than once, the one loaded last
+wins, and a warning names both files:
+
+~~~
+[warning] name rule 'gcc' from /etc/ananicy.d/99-local.rules replaces the one from /etc/ananicy.d/00-default/compilers.rules (the last one loaded wins)
+~~~
+
+To override a community rule, put your version in a file that sorts later, e.g.
+`/etc/ananicy.d/99-local.rules`. `cmdline_contains` rules are not replaced this way:
+several can exist for the same name (see below).
+
 #### Rules for specific Java, Python, … programs
 
 Rules match the program name, which is the file name of `argv[0]`. Every Java program
@@ -228,7 +292,8 @@ case-sensitive) for the rule to apply:
 {"name": "java",    "nice": 0}
 ~~~
 
-- `cmdline_contains` rules for a name are tried in the order they are loaded, and the
+- `cmdline_contains` rules for a name are tried in load order (see "Load order and
+  duplicate rules" above), and the
   first one that matches wins. If none matches, the plain rule with the same `name`
   is used (if there is one). Several rules for the same name can therefore coexist.
 - `cmdline_contains` requires `name`. Without it (on its own, or on a `type`/`cgroup`
@@ -238,6 +303,14 @@ case-sensitive) for the rule to apply:
 - To see the exact command line ananicy-cpp matches against: `tr '\0' ' ' < /proc/<pid>/cmdline`.
 
 #### Supported attributes
+
+`nice`, `latency_nice`, `sched`, `ioclass`/`ionice` and `cpuset` are per-thread settings in
+Linux. ananicy-cpp applies them to **every thread** of the process, so multi-threaded programs
+(Java, games, browsers…) get them on all their threads, not only the main one.
+
+If an attribute cannot be applied (missing permission, a value the kernel rejects, an unknown
+`sched` or `ioclass` name), the error is logged and the rule's **other attributes are still
+applied**. Only a process that has exited stops the rest of its rule.
 
 - `nice: [-20-19]`: Set the nice value of the process.
 A process with a higher nice value will be more "polite", and will get less
@@ -251,8 +324,8 @@ Set the scheduling policy.
   - `fifo` and `rr` (for round-robin) are realtime scheduling policies, and must only be used for
 latency critical programs, like `Xorg` or `pulseaudio` for instance. Nice values are ignored,
   `rtprio` should be used instead.
-  - `deadline`: Special realtime scheduling policy which _can't_ be set by `ananicy-cpp`,
-  but can be reported by it.
+  - `deadline`: Special realtime scheduling policy which _can't_ be set by `ananicy-cpp`.
+  A rule with `"sched": "deadline"` logs a warning and leaves the process's current policy unchanged.
   - `normal` is well... normal, the default behavior for the current OS.
   Specifying this option can be useful if you want to force the child of a
   realtime process to have a normal scheduling policy.

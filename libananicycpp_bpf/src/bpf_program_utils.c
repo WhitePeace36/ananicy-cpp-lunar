@@ -72,6 +72,12 @@ void destroy_bpf_program(ananicy_cpp_bpf_t* obj, struct perf_buffer* pb) {
     //cleanup_core_btf(&open_opts);
 }
 
+uint64_t bpf_program_take_dropped_events(ananicy_cpp_bpf_t* obj) {
+    if (!obj || !obj->bss)
+        return 0;
+    return __atomic_exchange_n(&obj->bss->dropped_events, 0, __ATOMIC_RELAXED);
+}
+
 struct perf_buffer* bpf_program_init_events(ananicy_cpp_bpf_t* obj) {
     return perf_buffer__new(bpf_map__fd(obj->maps.events), 64,
                 handle_event, handle_lost_events, NULL, NULL);

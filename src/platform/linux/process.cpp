@@ -12,6 +12,7 @@
 #endif
 
 #include <atomic>     // for atomic
+#include <chrono>     // for steady_clock
 #include <filesystem> // for path
 #include <fstream>    // for ifstream
 #include <thread>     // for jthread
@@ -27,6 +28,8 @@ namespace fs = std::filesystem;
 #if defined(USE_BPF_PROC_IMPL)
 static volatile std::atomic<bool>   g_exiting;
 static synchronized_queue<Process> *g_process_queue;
+/// Set when the perf buffer overflowed and events were dropped.
+static std::atomic<std::uint64_t>   g_lost_events{0};
 
 void ProcessQueue::init() noexcept {
   g_process_queue = &this->process_queue;
@@ -59,21 +62,35 @@ extern "C" void handle_event(void *ctx, int32_t cpu, void *data,
     return;
   }
 
-  std::string &&command = get_command_from_pid(e->pid);
+  // This is a C callback driven by libbpf: an exception escaping it
+  // terminates the daemon, so a single vanished process must never do that.
+  try {
+    std::string &&command = get_command_from_pid(e->pid);
 
-  Process process{
-      .delta_us = e->delta_us, .pid = e->pid, .name = std::move(command)};
-  spdlog::trace("Pushing new process: pid = {}", e->pid);
-  g_process_queue->push(std::move(process));
+    Process process{
+        .delta_us = e->delta_us, .pid = e->pid, .name = std::move(command)};
+    spdlog::trace("Pushing new process: pid = {}", e->pid);
+    g_process_queue->push(std::move(process));
+  } catch (const std::exception &ex) {
+    spdlog::debug("{}: skipping pid {}: {}", __func__, e->pid, ex.what());
+  }
 }
 
 extern "C" void handle_lost_events(void *ctx, int cpu, __u64 lost_cnt) {
-  fmt::print(stderr, "Lost {} events on CPU {}!\n", lost_cnt, cpu);
+  // Processes started in that window would keep their default priority
+  // forever: remember it, the event loop then rescans /proc.
+  spdlog::warn("Lost {} process events on CPU {}, a full scan will follow",
+               lost_cnt, cpu);
+  g_lost_events.fetch_add(lost_cnt, std::memory_order_relaxed);
 }
 
-static std::int32_t handle_events(BPFProgram                  *bpf_program,
-                                  synchronized_queue<Process> *queue,
-                                  const std::stop_token       &stop_token) {
+static std::int32_t handle_events(BPFProgram   *bpf_program,
+                                  ProcessQueue *process_queue,
+                                  const std::stop_token &stop_token) {
+  using clock = std::chrono::steady_clock;
+  // At most one recovery scan per second, however many buffers overflow.
+  static constexpr auto LOST_EVENTS_RESCAN_INTERVAL = std::chrono::seconds(1);
+  clock::time_point     last_rescan{};
 
   std::int32_t status{};
   // while (!stop_token.stop_requested()) {
@@ -86,6 +103,24 @@ static std::int32_t handle_events(BPFProgram                  *bpf_program,
     }
     /* reset err to return 0 if exiting */
     status = 0;
+
+    // Drops counted by the BPF program itself: known right away, unlike the
+    // kernel's lost-event records (handle_lost_events), which only arrive
+    // with the next event written to the same ring.
+    if (const auto dropped = bpf_program->take_dropped_events(); dropped != 0) {
+      spdlog::warn("{} process events dropped (buffer full), a full scan will "
+                   "follow",
+                   dropped);
+      g_lost_events.fetch_add(dropped, std::memory_order_relaxed);
+    }
+
+    if (g_lost_events.load(std::memory_order_relaxed) != 0 &&
+        clock::now() - last_rescan >= LOST_EVENTS_RESCAN_INTERVAL) {
+      const auto lost = g_lost_events.exchange(0, std::memory_order_relaxed);
+      spdlog::info("Rescanning /proc after {} lost process events", lost);
+      process_queue->full_scan();
+      last_rescan = clock::now();
+    }
   }
 
   return status;
@@ -98,7 +133,7 @@ void ProcessQueue::start() {
         while (ret == EXIT_FAILURE && !stop_token.stop_requested()) {
           spdlog::trace("Starting handle_events");
 
-          ret = handle_events(&m_bpf_program, &this->process_queue, stop_token);
+          ret = handle_events(&m_bpf_program, this, stop_token);
 
           if (ret == EXIT_SUCCESS || stop_token.stop_requested())
             break;
@@ -122,7 +157,9 @@ static std::int32_t handle_events(NetlinkProgram              *netlink_program,
     status = netlink_program->pool_message();
     const std::int32_t errnum = errno;
     if (status == 0) {
-      return EXIT_SUCCESS;
+      // An empty datagram: nothing to do. Returning here used to end the
+      // event thread for good, silently, leaving only the startup scan.
+      continue;
     } else if (status == -1) {
       if (errnum == EINTR || errnum == EAGAIN) {
         continue;
@@ -154,9 +191,13 @@ static std::int32_t handle_events(NetlinkProgram              *netlink_program,
     prev_pid = pid;
     prev_type = type;
 
-    Process process{.pid = pid, .name = get_command_from_pid(pid)};
-    spdlog::trace("Pushing new process: pid = {}", pid);
-    queue->push(std::move(process));
+    try {
+      Process process{.pid = pid, .name = get_command_from_pid(pid)};
+      spdlog::trace("Pushing new process: pid = {}", pid);
+      queue->push(std::move(process));
+    } catch (const std::exception &ex) {
+      spdlog::debug("{}: skipping pid {}: {}", __func__, pid, ex.what());
+    }
   }
 
   return static_cast<std::int32_t>(status);
@@ -201,7 +242,8 @@ std::string get_command_from_pid(pid_t pid) {
   // Cmdline method
   try {
     std::vector<std::string> cmdline = process_info::get_cmdline_from_pid(pid);
-    if (!cmdline.empty()) {
+    // An empty argv[0] (exec -a '' ...) carries no name: use the exe link.
+    if (!cmdline.empty() && !cmdline[0].empty()) {
       // Wine/Proton processes show the Windows path of the image as argv[0]
       // (e.g. "C:\\Games\\game.exe"), so split on backslashes as well.
       // Done here so the full scan and the netlink backend match .exe rules

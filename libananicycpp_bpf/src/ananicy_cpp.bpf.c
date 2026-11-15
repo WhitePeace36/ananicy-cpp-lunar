@@ -21,6 +21,15 @@ const volatile pid_t targ_pid = 0;
 const volatile pid_t targ_tgid = 0;
 const volatile uid_t targ_uid = INVALID_UID;
 
+/*
+ * Events that could not be written because the perf ring was full. The
+ * kernel only reports such losses lazily (with the *next* event written to
+ * that ring), which may never come on a quiet system; user space reads and
+ * resets this counter directly and rescans /proc when it is not zero.
+ */
+__u64 dropped_events = 0;
+
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, 10240);
@@ -41,6 +50,11 @@ struct {
     __uint(key_size, sizeof(u32));
     __uint(value_size, sizeof(u32));
 } events SEC(".maps");
+
+static __always_inline void output_event(void *ctx, struct event *e) {
+    if (bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, e, sizeof(*e)))
+        __sync_fetch_and_add(&dropped_events, 1);
+}
 
 static __always_inline bool valid_uid(uid_t uid) {
     return uid != INVALID_UID;
@@ -93,8 +107,7 @@ int handle_exec(struct trace_event_raw_sched_process_exec* ctx)
     e->prev_pid = 0;
 
     /* output */
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU,
-                  e, sizeof(*e));
+    output_event(ctx, e);
     return 0;
 }
 
@@ -128,8 +141,7 @@ int BPF_PROG(handle_fork, struct task_struct *parent, struct task_struct *child)
     BPF_CORE_READ_STR_INTO(&e->task, child, comm);
 
     /* output */
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU,
-                  e, sizeof(*e));
+    output_event(ctx, e);
     return 0;
 }
 
@@ -163,8 +175,7 @@ int BPF_PROG(handle_rename, struct task_struct *task, const char *comm)
     e->prev_pid = 0; /* a rename is never a duplicate */
 
     /* output */
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU,
-                  e, sizeof(*e));
+    output_event(ctx, e);
     return 0;
 }
 

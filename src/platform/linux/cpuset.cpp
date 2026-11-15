@@ -1,5 +1,6 @@
 #include "core/cpuset.hpp"
 #include "utility/utils.hpp"
+#include "task_helpers.hpp"
 
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -46,25 +47,6 @@ cpu_set_t *cpuset_alloc(int ncpus, size_t *setsize, size_t *nbits) noexcept {
 
 void cpuset_free(cpu_set_t *set) noexcept { CPU_FREE(set); }
 
-std::int32_t test_errno(std::int32_t errcode, const std::string_view &func_name,
-                        pid_t pid) {
-  if (errcode == 0) {
-    spdlog::debug("{}: Successfully applied to {}", func_name, pid);
-    return 1;
-  }
-
-  if (errcode == ESRCH) {
-    spdlog::warn("{}: Process not found: {}", func_name, pid);
-    return 0;
-  } else if (errcode == EACCES || errcode == EPERM) {
-    throw std::runtime_error(fmt::format(
-        "{}: Insufficient permission to set cpu affinity of process {}",
-        func_name, pid));
-  }
-  spdlog::error(fmt::format("{}: Unknown error, errno is {}({})", func_name,
-                            std::string_view{strerror(errcode)}, errcode));
-  return -1;
-}
 
 } // namespace
 
@@ -284,31 +266,16 @@ std::optional<CpuSet> parse_cpuset_string(const std::string_view &cpuset_str,
 
 bool set_affinity(pid_t pid, const CpuSet &cpuset) {
   if (!cpuset.valid()) {
-    return false;
+    // A bad cpuset is a rule problem, not a vanished process.
+    spdlog::error("{}: invalid cpuset for process {}", __func__, pid);
+    return true;
   }
 
-  std::int32_t errcode = 0;
-  const auto  &task_path = fmt::format("/proc/{}/task", pid);
-  try {
-    for (const auto &dir_entry : fs::directory_iterator(task_path)) {
-      const auto &filename = dir_entry.path().filename().string();
-      const auto  tid = to_int<std::int32_t>(filename);
-      errno = 0;
-      if (tid > 0) {
-        sched_setaffinity(tid, cpuset.setsize, cpuset.set);
-      }
-      errcode = errno;
-    }
-  } catch (const fs::filesystem_error &e) {
-    spdlog::debug(fmt::format("{}: filesystem_error: {} (path: {})", __func__,
-                              e.what(), std::string_view{e.path1().c_str()}));
-    return false;
-  } catch (const std::exception &e) {
-    spdlog::critical(
-        fmt::format("{}: unknown exception: {}", __func__, e.what()));
-  }
-
-  return test_errno(errcode, __func__, pid);
+  const std::int32_t err = task_helpers::for_each_thread(pid, [&](pid_t tid) {
+    errno = 0;
+    return sched_setaffinity(tid, cpuset.setsize, cpuset.set) == 0 ? 0 : errno;
+  });
+  return task_helpers::report(err, __func__, pid);
 }
 
 std::string cpuset_to_string(const CpuSet &cpuset) {

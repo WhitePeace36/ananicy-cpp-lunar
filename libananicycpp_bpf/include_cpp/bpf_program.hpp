@@ -43,6 +43,9 @@ public:
     m_perf_buffer = nullptr;
   }
   int pool_event() noexcept { return perf_buffer__poll(m_perf_buffer, 100); }
+  std::uint64_t take_dropped_events() noexcept {
+    return bpf_program_take_dropped_events(m_bpf_program);
+  }
 
   perf_buffer *get_perf_buffer() noexcept { return m_perf_buffer; }
 

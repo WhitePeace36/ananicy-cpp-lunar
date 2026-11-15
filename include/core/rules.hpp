@@ -40,6 +40,12 @@ private:
 
   nlohmann::json apply_type(nlohmann::json rule) const noexcept;
 
+  /// File currently being loaded (empty for rules given as strings), and
+  /// where each name/type/cgroup rule came from, to report redefinitions.
+  std::string                                  m_current_source{};
+  std::unordered_map<std::string, std::string> m_rule_sources{};
+  void note_definition(std::string_view kind, const std::string &key);
+
 #ifdef ENABLE_REGEX_SUPPORT
   std::vector<std::pair<std::string, std::string>> m_regex_rules{};
 #endif
