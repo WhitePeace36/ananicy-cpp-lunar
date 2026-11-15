@@ -9,6 +9,7 @@
 #include "utility/regex_utils.hpp"
 #endif
 
+#include <algorithm>   // for all_of, any_of
 #include <filesystem>  // for path, recursive_directory_iterator
 #include <fstream>     // for ifstream
 #include <iostream>    // for cout
@@ -67,7 +68,45 @@ bool Rules::load_rule_from_string(const std::string_view &line) {
   try {
     auto &&rule = json::parse(clean_line);
 
-    if (rule.contains("name") && rule["name"].is_string()) { /* Program rule */
+    const bool has_name = rule.contains("name") && rule["name"].is_string();
+
+    if (rule.contains("cmdline_contains")) {
+      /* "cmdline_contains" only narrows a "name" rule; on its own (or on a
+       * type or cgroup line) it would otherwise silently redefine a type. */
+      if (!has_name) {
+        spdlog::warn("Ignoring rule: \"cmdline_contains\" requires \"name\": {}",
+                     rule.dump());
+        return false;
+      }
+
+      const auto &field = rule["cmdline_contains"];
+      std::vector<std::string> needles;
+      if (field.is_string()) {
+        needles.push_back(field.get<std::string>());
+      } else if (field.is_array()) {
+        for (const auto &item : field) {
+          if (!item.is_string()) {
+            needles.clear();
+            break;
+          }
+          needles.push_back(item.get<std::string>());
+        }
+      }
+      if (needles.empty() ||
+          std::any_of(needles.begin(), needles.end(),
+                      [](const auto &n) { return n.empty(); })) {
+        spdlog::error("Ignoring rule: \"cmdline_contains\" must be a non-empty "
+                      "string or a non-empty list of non-empty strings: {}",
+                      rule.dump());
+        return false;
+      }
+
+      m_cmdline_rules[rule["name"].get<std::string>()].push_back(
+          {std::move(needles), rule});
+      return true;
+    }
+
+    if (has_name) { /* Program rule */
       const auto &rule_name = rule["name"];
       m_program_rules.insert_or_assign(rule_name, rule);
 
@@ -124,6 +163,12 @@ void Rules::show_all_rules() const noexcept {
   for (const auto &rule : m_program_rules) {
     spdlog::debug(fmt::format("Rule: {}, {}", rule.first, rule.second.dump()));
   }
+  for (const auto &[name, candidates] : m_cmdline_rules) {
+    for (const auto &candidate : candidates) {
+      spdlog::debug(fmt::format("Cmdline rule: {}, {}", name,
+                                candidate.rule.dump()));
+    }
+  }
 }
 
 void Rules::show_rules(rule_type type) const noexcept {
@@ -136,6 +181,13 @@ void Rules::show_rules(rule_type type) const noexcept {
   if (type == rule_type::rules) {
     for (const auto &rule : rules) {
       rules_display[rule.first] = get_rule(rule.first);
+    }
+    for (const auto &[name, candidates] : m_cmdline_rules) {
+      for (const auto &candidate : candidates) {
+        rules_display[fmt::format("{} [cmdline: {}]", name,
+                                  json(candidate.needles).dump())] =
+            apply_type(candidate.rule);
+      }
     }
   } else {
     for (const auto &rule : rules) {
@@ -178,6 +230,19 @@ void Rules::create_cgroups() const noexcept {
   spdlog::info("Finished creating Cgroups...");
 }
 
+json Rules::apply_type(json rule) const noexcept {
+  if (rule.contains("type") && m_type_rules.contains(rule["type"])) {
+    json type_rule =
+        m_type_rules.at(rule["type"]); // We create a copy of the type rule to
+                                       // avoid overwriting it
+    type_rule.merge_patch(
+        rule); // We then merge the rule into it, overriding parameters from
+               // the type with those explicitly specified in the rule
+    rule.merge_patch(type_rule); // We then merge it back into the rule
+  }
+  return rule;
+}
+
 json Rules::get_rule(const std::string &name) const noexcept {
   json rule;
 
@@ -195,18 +260,35 @@ json Rules::get_rule(const std::string &name) const noexcept {
 #endif
   }
 
-  if (rule.contains("type") && m_type_rules.contains(rule["type"])) {
-    json type_rule =
-        m_type_rules.at(rule["type"]); // We create a copy of the type rule to
-                                       // avoid overwriting it
-    type_rule.merge_patch(
-        rule); // We then merge the rule into it, overriding parameters from
-               // the type with those explicitly specified in the rule
-    rule.merge_patch(type_rule); // We then merge it back into the rule
+  return apply_type(std::move(rule));
+}
+
+json Rules::get_rule(const std::string &name,
+                     std::string_view   cmdline) const noexcept {
+  if (const auto it = m_cmdline_rules.find(name);
+      it != m_cmdline_rules.end()) {
+    for (const auto &candidate : it->second) {
+      const bool matches =
+          std::all_of(candidate.needles.begin(), candidate.needles.end(),
+                      [&](const std::string &needle) {
+                        return cmdline.find(needle) != std::string_view::npos;
+                      });
+      if (matches) {
+        return apply_type(candidate.rule);
+      }
+    }
   }
-  return rule;
+  return get_rule(name);
+}
+
+bool Rules::has_cmdline_rules(const std::string &name) const noexcept {
+  return m_cmdline_rules.contains(name);
 }
 
 [[gnu::pure]] size_t Rules::size() const noexcept {
-  return m_program_rules.size();
+  size_t count = m_program_rules.size();
+  for (const auto &entry : m_cmdline_rules) {
+    count += entry.second.size();
+  }
+  return count;
 }

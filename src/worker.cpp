@@ -77,7 +77,13 @@ void Worker::work(const std::stop_token &stop_token) {
   while (!stop_token.stop_requested()) {
     while ((proc = process_queue->poll(500ms)).has_value()) {
       const auto &p = proc.value();
-      const auto &rule = rules->get_rule(p.name);
+      // Only read /proc/<pid>/cmdline when this name has cmdline_contains
+      // rules; every other process keeps the single name lookup.
+      const auto &rule =
+          rules->has_cmdline_rules(p.name)
+              ? rules->get_rule(p.name, process_info::get_cmdline_string(
+                                            static_cast<unsigned>(p.pid)))
+              : rules->get_rule(p.name);
 
       processed_count++;
 

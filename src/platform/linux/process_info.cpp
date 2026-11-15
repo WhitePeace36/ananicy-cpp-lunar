@@ -36,6 +36,17 @@ static autogroup get_autogroup_from_str(const std::string &str) {
           {"nice", to_int(str.substr(begin_nice_num, end_nice_num))}};
 }
 
+std::string get_cmdline_string(process_id_t pid) {
+  std::string joined;
+  for (const auto &arg : get_cmdline_from_pid(static_cast<int32_t>(pid))) {
+    if (!joined.empty()) {
+      joined += ' ';
+    }
+    joined += arg;
+  }
+  return joined;
+}
+
 nlohmann::json get_autogroup_map() {
   nlohmann::json autogroup_map = {};
 

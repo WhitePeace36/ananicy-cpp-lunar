@@ -209,6 +209,30 @@ Or to pin to specific cores directly:
 
 You can then (re)start `ananicy-cpp.service`.
 
+#### Rules for specific Java, Python, … programs
+
+Rules match the program name, which is the file name of `argv[0]`. Every Java program
+is therefore `java` and every Python script is `python3`. To tell them apart, add
+`cmdline_contains` to a `name` rule. It can be a string or a list of strings, and every
+string must appear somewhere in the full command line (the arguments joined by spaces,
+case-sensitive) for the rule to apply:
+
+~~~json
+{"name": "java",    "cmdline_contains": "minecraft", "type": "Game"}
+{"name": "java",    "cmdline_contains": ["-jar", "jenkins.war"], "nice": 10}
+{"name": "python3", "cmdline_contains": "jupyter-lab", "nice": 5}
+{"name": "java",    "nice": 0}
+~~~
+
+- `cmdline_contains` rules for a name are tried in the order they are loaded, and the
+  first one that matches wins. If none matches, the plain rule with the same `name`
+  is used (if there is one). Several rules for the same name can therefore coexist.
+- `cmdline_contains` requires `name`. Without it (on its own, or on a `type`/`cgroup`
+  line) the line is ignored with a warning.
+- The command line is only read for names that have `cmdline_contains` rules, so other
+  processes cost nothing extra.
+- To see the exact command line ananicy-cpp matches against: `tr '\0' ' ' < /proc/<pid>/cmdline`.
+
 #### Supported attributes
 
 - `nice: [-20-19]`: Set the nice value of the process.

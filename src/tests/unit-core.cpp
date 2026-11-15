@@ -275,4 +275,69 @@ TEST_CASE("Rules")
     CHECK(rules.size() == 1);
     fs::remove(tmp_path);
   }
+
+  SECTION("cmdline_contains rules")
+  {
+    Rules rules("", &conf);
+    CHECK(rules.load_rule_from_string("{ \"type\": \"Game\", \"nice\": -5, \"ioclass\": \"best-effort\" }"));
+    CHECK(rules.load_rule_from_string("{ \"name\": \"java\", \"nice\": 3 }"));
+    CHECK(rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": \"minecraft\", \"type\": \"Game\" }"));
+    CHECK(rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": [\"-jar\", \"jenkins.war\"], \"nice\": 10 }"));
+    CHECK(rules.size() == 3);
+
+    // A cmdline rule must not overwrite the plain name rule.
+    CHECK(rules.get_rule("java")["nice"] == 3);
+    CHECK(rules.has_cmdline_rules("java"));
+    CHECK(!rules.has_cmdline_rules("python3"));
+
+    // Single needle, with type merging.
+    const auto mc = rules.get_rule("java", "java -Xmx4G -cp minecraft-1.21.jar net.minecraft.Main");
+    CHECK(mc["nice"] == -5);
+    CHECK(mc["ioclass"] == "best-effort");
+
+    // All needles must match.
+    CHECK(rules.get_rule("java", "java -jar /opt/jenkins.war")["nice"] == 10);
+    CHECK(rules.get_rule("java", "java -cp jenkins.war Main")["nice"] == 3);
+
+    // No match falls back to the plain name rule.
+    CHECK(rules.get_rule("java", "java -jar other.jar")["nice"] == 3);
+
+    // Rules only apply for their own name.
+    CHECK(rules.get_rule("python3", "python3 minecraft.py").is_null());
+
+    // First matching rule in load order wins.
+    CHECK(rules.get_rule("java", "java -jar jenkins.war minecraft")["nice"] == -5);
+  }
+
+  SECTION("cmdline_contains without a plain name rule")
+  {
+    Rules rules("", &conf);
+    CHECK(rules.load_rule_from_string("{ \"name\": \"python3\", \"cmdline_contains\": \"jupyter-lab\", \"nice\": 5 }"));
+    CHECK(rules.get_rule("python3", "/usr/bin/python3 /usr/bin/jupyter-lab")["nice"] == 5);
+    CHECK(rules.get_rule("python3", "python3 script.py").is_null());
+    CHECK(rules.get_rule("python3").is_null());
+  }
+
+  SECTION("cmdline_contains alone does nothing")
+  {
+    Rules rules("", &conf);
+    CHECK(!rules.load_rule_from_string("{ \"cmdline_contains\": \"minecraft\", \"nice\": -5 }"));
+    // Must not be taken as a (re)definition of type Game.
+    CHECK(!rules.load_rule_from_string("{ \"type\": \"Game\", \"cmdline_contains\": \"minecraft\", \"nice\": -5 }"));
+    CHECK(!rules.load_rule_from_string("{ \"cgroup\": \"cpu80\", \"cmdline_contains\": \"minecraft\" }"));
+    CHECK(rules.size() == 0);
+    CHECK(rules.get_rule("java", "java minecraft").is_null());
+  }
+
+  SECTION("cmdline_contains invalid values")
+  {
+    Rules rules("", &conf);
+    CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": \"\" }"));
+    CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": [] }"));
+    CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": [\"a\", 1] }"));
+    CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": [\"a\", \"\"] }"));
+    CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": 42 }"));
+    CHECK(rules.size() == 0);
+    CHECK(!rules.has_cmdline_rules("java"));
+  }
 }
