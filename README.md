@@ -147,7 +147,7 @@ You can have more information in `systemd`'s man page (`man systemd` on Linux)
 | `ananicy-cpp dump types` / `dump cgroups` | Print the loaded types / cgroup definitions. |
 | `ananicy-cpp dump proc` / `dump autogroup` | Print what ananicy-cpp sees for every running process / the autogroups. |
 | `ananicy-cpp debug cgroups` | Print cgroup diagnostics for bug reports. |
-| `ananicy-cpp --reload` | Ask the running daemon to reload its configuration. Fails (exit status 1) if no daemon is running. |
+| `ananicy-cpp --reload` | Ask the running daemon to reread `ananicy.conf` (the `apply_*` switches, `loglevel`, …). Rules, types and cgroups are **not** reloaded: restart the service after changing them. Fails (exit status 1) if no daemon is running. |
 | `ananicy-cpp --version` / `--help` | Version / usage. |
 
 An unknown command (e.g. `ananicy-cpp show rules`) prints the usage and exits with
@@ -413,6 +413,11 @@ Only one attribute is supported, `CPUQuota`:
 ~~~json
 {"cgroup": "cpu80", "CPUQuota": 80}
 ~~~
+
+`CPUQuota` is a percentage of the **whole machine** (all CPUs together), from 0 to 100.
+`80` lets the processes in the cgroup use 80 % of all CPU time. On 4 CPUs that is 3.2 CPUs
+(`cpu.max` = `320000 100000`). This is different from systemd's `CPUQuota=`, where 100 %
+means one CPU.
 
 One major limitations of `cgroups` right now is that they can only be created by the `root` user.
 You can _not_ use a `CAP_SYS_CGROUP` capability thing like for other things, because it simply does not exist yet.
