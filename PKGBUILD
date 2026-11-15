@@ -28,7 +28,7 @@ fi
 # into this file, which would leave it modified in git after every build.
 _version() {
   # Upstream's current version (README); its last tag is still v1.1.1. CMake needs it to start with x.y.z.
-  local base=1.2.0
+  local base=1.3.0
   # safe.directory: git refuses repositories owned by another user (common on external drives).
   local git=(git -c safe.directory="$startdir" -C "$startdir")
   if "${git[@]}" rev-parse HEAD >/dev/null 2>&1; then
