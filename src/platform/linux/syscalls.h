@@ -46,11 +46,11 @@ enum {
  */
 #define IOPRIO_NORM (4)
 
-static int ioprio_set(__priority_which_t _which, id_t _who, int _prio) {
+static inline int ioprio_set(__priority_which_t _which, id_t _who, int _prio) {
   return static_cast<int>(syscall(SYS_ioprio_set, _which, _who, _prio));
 }
 
-static int ioprio_get(__priority_which_t _which, id_t _who) {
+static inline int ioprio_get(__priority_which_t _which, id_t _who) {
   return static_cast<int>(syscall(SYS_ioprio_get, _which, _who));
 }
 
@@ -94,17 +94,17 @@ struct [[gnu::packed]] ananicy_sched_attr {
   int32_t sched_latency_nice;
 };
 
-static int ananicy_sched_setattr(pid_t pid, const struct ananicy_sched_attr *attr,
+static inline int ananicy_sched_setattr(pid_t pid, const struct ananicy_sched_attr *attr,
                          unsigned int flags) {
   return static_cast<int>(syscall(__NR_sched_setattr, pid, attr, flags));
 }
 
-static int ananicy_sched_getattr(pid_t pid, struct ananicy_sched_attr *attr, unsigned int size,
+static inline int ananicy_sched_getattr(pid_t pid, struct ananicy_sched_attr *attr, unsigned int size,
                          unsigned int flags) {
   return static_cast<int>(syscall(__NR_sched_getattr, pid, attr, size, flags));
 }
 
-static int get_latnice(pid_t pid) {
+static inline int get_latnice(pid_t pid) {
   // pid==0 refers to calling thread
   struct ananicy_sched_attr attr = { .size = sizeof(struct ananicy_sched_attr) };
   if (ananicy_sched_getattr(pid, &attr, sizeof(attr), 0) < 0) {
@@ -113,7 +113,7 @@ static int get_latnice(pid_t pid) {
   return attr.sched_latency_nice; // defaults to 0
 }
 
-static int set_latnice(pid_t pid, int latency_nice) {
+static inline int set_latnice(pid_t pid, int latency_nice) {
   // pid==0 refers to calling thread
   struct ananicy_sched_attr attr = {
     .size = sizeof(struct ananicy_sched_attr),

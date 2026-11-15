@@ -1,16 +1,14 @@
 #include "service.hpp"
 
+#include <cerrno>
+#include <cstdlib>
+
 #include <systemd/sd-daemon.h>
 #include <systemd/sd-login.h>
 #include <unistd.h>
 
-#include <spdlog/spdlog.h>
-
 namespace service {
-status current_status = STARTING;
-
 void set_status(service::status status) {
-  current_status = status;
   switch (status) {
   case STARTING:
     break;
@@ -24,12 +22,6 @@ void set_status(service::status status) {
     break;
   }
 }
-
-[[gnu::pure]] status get_status() { return current_status; }
-
-void reload() { spdlog::warn("{}: Not implemented yet", __func__); }
-
-void stop() { spdlog::warn("{}: Not implemented yet", __func__); }
 
 std::string get_unit_name() {
   char *unit_name;

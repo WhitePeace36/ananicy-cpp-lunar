@@ -11,8 +11,7 @@ class BPFProgram {
 public:
   /// Default constructor.
   BPFProgram() = default;
-  BPFProgram(std::uint64_t min_us, bool verbose) noexcept
-      : m_min_us(min_us), m_verbose(verbose) {}
+  explicit BPFProgram(bool verbose) noexcept : m_verbose(verbose) {}
   ~BPFProgram() = default;
 
   constexpr BPFProgram(BPFProgram &&program) = default;
@@ -25,7 +24,7 @@ public:
       return false;
     }
 
-    m_bpf_program = initialize_bpf_program(m_min_us, m_verbose);
+    m_bpf_program = initialize_bpf_program(m_verbose);
     m_perf_buffer = bpf_program_init_events(m_bpf_program);
     if ((m_bpf_program == nullptr) || (m_perf_buffer == nullptr)) {
       destroy_bpf_program(m_bpf_program, m_perf_buffer);
@@ -47,7 +46,6 @@ public:
     return bpf_program_take_dropped_events(m_bpf_program);
   }
 
-  perf_buffer *get_perf_buffer() noexcept { return m_perf_buffer; }
 
   //
   // deleted
@@ -58,7 +56,6 @@ private:
   bool               m_verbose{false};
   ananicy_cpp_bpf_t *m_bpf_program{nullptr};
   perf_buffer       *m_perf_buffer{nullptr};
-  std::uint64_t      m_min_us{30};
 };
 
 #endif // BPF_PROGRAM_HPP

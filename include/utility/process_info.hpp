@@ -13,7 +13,6 @@ using process_info = nlohmann::json;
 using process_id_t = unsigned;
 
 bool is_realtime(process_id_t pid);
-bool is_kernel_process(process_id_t pid);
 
 /// /proc/<pid>/cmdline with the arguments joined by single spaces
 /// (empty if the process is gone or has no command line).

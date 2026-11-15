@@ -89,7 +89,6 @@ public:
 
   [[nodiscard]] bool is_positional() const;
   [[nodiscard]] bool is_flag() const;
-  [[nodiscard]] bool is_defined() const;
 
   [[nodiscard]] operator std::string() const;
 
@@ -115,7 +114,6 @@ public:
   argparse_error parse_args(int argc, const char **argv);
 
   argument &add_argument();
-  argument &add_argument(const argument &argument);
   argument &add_argument(const std::string &name);
 
   std::optional<argument> get_arg(const std::string &name);

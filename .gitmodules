@@ -1,3 +1,0 @@
-[submodule "external/std-format"]
-    path = external/std-format
-    url = https://gitlab.com/vnepogodin/std-format.git

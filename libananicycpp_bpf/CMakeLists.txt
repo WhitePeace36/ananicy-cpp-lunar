@@ -8,7 +8,6 @@ project(ananicy_cpp_bpf
 include(CPM)
 include(ExternalProject)
 
-option(BPF_BUILD_SAMPLES "Build ananicy_cpp_bpf samples" OFF)
 option(BPF_BUILD_LIBBPF  "Build libbpf" ON)
 option(BPF_BUILD_BPFTOOL "Build bpftool" OFF)
 
@@ -134,9 +133,6 @@ endif()
 
 add_library(ananicy_cpp_bpf_c STATIC
   src/bpf_program_utils.c
-  src/btf_helpers.c
-  src/trace_helpers.c
-  src/uprobe_helpers.c
 )
 target_include_directories(ananicy_cpp_bpf_c PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(ananicy_cpp_bpf_c PRIVATE ananicy_cpp_skel)
@@ -154,12 +150,3 @@ add_dependencies(ananicy_cpp_bpf_cpp ananicy_cpp_bpf_c)
 add_library(ananicy_cpp_bpf_cpp::ananicy_cpp_bpf_cpp ALIAS ananicy_cpp_bpf_cpp)
 
 
-if(BPF_BUILD_SAMPLES)
-  add_executable(runqslower_cpp main.cpp)
-  target_compile_features(runqslower_cpp PUBLIC cxx_std_20)
-  target_compile_definitions(runqslower_cpp PUBLIC -DSPDLOG_FMT_EXTERNAL -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
-  target_link_libraries(runqslower_cpp PRIVATE spdlog fmt ananicy_cpp_bpf_cpp::ananicy_cpp_bpf_cpp ananicy_cpp_bpf_c::ananicy_cpp_bpf_c)
-
-  add_executable(runqslower_c runqslower.c)
-  target_link_libraries(runqslower_c PRIVATE ananicy_cpp_bpf_c::ananicy_cpp_bpf_c)
-endif()

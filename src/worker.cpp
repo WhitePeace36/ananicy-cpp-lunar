@@ -88,7 +88,6 @@ void Worker::work(const std::stop_token &stop_token) {
       processed_count++;
 
       const bool is_realtime = process_info::is_realtime(p.pid);
-      const bool is_kernel = process_info::is_kernel_process(p.pid);
 
       if (!rule.is_null()) {
         bool do_log_applied_rule = config->log_applied_rule();

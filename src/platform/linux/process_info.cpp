@@ -129,11 +129,6 @@ bool is_realtime(process_id_t pid) {
   return attr.sched_priority > 0;
 }
 
-bool is_kernel_process(process_id_t pid) {
-  auto status = parse_proc_status(pid);
-  return (status["PPid"] == "0") || (status["PPid"] == "2");
-}
-
 enum io_prio_class {
   NONE = IOPRIO_CLASS_NONE,
   REALTIME = IOPRIO_CLASS_RT,

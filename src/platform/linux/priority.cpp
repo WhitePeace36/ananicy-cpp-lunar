@@ -37,7 +37,6 @@ bool set_latency_nice(pid_t pid, std::int32_t latency_nice_value) {
   return task_helpers::report(err, __func__, pid);
 }
 
-std::int32_t get_latency_nice(pid_t pid) { return get_latnice(pid); }
 
 bool set_io_priority(pid_t pid, const std::string_view &io_class,
                      std::int32_t value) {

@@ -68,8 +68,6 @@ void argument::set_value(const std::string &value) { m_value = value; }
 
 [[gnu::pure]] bool argument::is_flag() const { return m_is_flag; }
 
-bool argument::is_defined() const { return m_value.has_value(); }
-
 std::optional<std::string> argument::get_value() const { return m_value; }
 
 std::string argument::get_name() const { return m_name; }

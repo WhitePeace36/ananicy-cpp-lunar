@@ -44,21 +44,16 @@ void ProcessQueue::init() noexcept {
 
 extern "C" void handle_event(void *ctx, int32_t cpu, void *data,
                              uint32_t data_sz) {
-  static constexpr auto TASK_COMM_LEN = 16;
-
+  // Must match struct event in ananicy_cpp.bpf.c.
   struct event {
     pid_t pid;
-    pid_t prev_pid;
-    __u64 delta_us;
-    char  task[TASK_COMM_LEN];
   };
 
-  auto *e = static_cast<struct event *>(data);
-
-  /// Don't add process to the queue,
-  /// if it's equal to previous one.
-  /// @see: https://gitlab.com/ananicy-cpp/ananicy-cpp/-/issues/20
-  if (e->pid == 0 || !g_process_queue || e->pid == e->prev_pid) {
+  if (data_sz < sizeof(event)) {
+    return;
+  }
+  const auto *e = static_cast<const struct event *>(data);
+  if (e->pid == 0 || !g_process_queue) {
     return;
   }
 
@@ -67,8 +62,7 @@ extern "C" void handle_event(void *ctx, int32_t cpu, void *data,
   try {
     std::string &&command = get_command_from_pid(e->pid);
 
-    Process process{
-        .delta_us = e->delta_us, .pid = e->pid, .name = std::move(command)};
+    Process process{.pid = e->pid, .name = std::move(command)};
     spdlog::trace("Pushing new process: pid = {}", e->pid);
     g_process_queue->push(std::move(process));
   } catch (const std::exception &ex) {

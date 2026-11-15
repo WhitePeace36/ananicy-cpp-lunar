@@ -115,11 +115,6 @@ argument &argument_parser::add_argument() {
   return m_args[arg.id];
 }
 
-argument &argument_parser::add_argument(const argument &arg) {
-  m_args.emplace(arg.id, arg);
-  return m_args[arg.id];
-}
-
 argument &argument_parser::add_argument(const std::string &name) {
   argument arg{name};
   m_args.emplace(arg.id, arg);

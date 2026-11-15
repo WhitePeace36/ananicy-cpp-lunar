@@ -16,8 +16,6 @@ bool set_priority(pid_t pid, int nice_value);
 
 bool set_latency_nice(pid_t pid, int latency_nice_value);
 
-int get_latency_nice(pid_t pid);
-
 bool set_io_priority(pid_t pid, const std::string_view &io_class, int value);
 
 bool set_sched(pid_t pid, const std::string_view &sched_name, unsigned rt_prio);
