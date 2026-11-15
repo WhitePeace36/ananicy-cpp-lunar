@@ -328,3 +328,19 @@ I mostly used Ananicy on older computers to improve interactivity. However, havi
 and a decent amount of CPU time troubled me. Thus I decided to rewrite it in C++, using an event based approach.
 RAM usage is much lower (only a few thousands of bytes !), and CPU usage is almost always zero thanks to its
 event-based implementation.
+
+## License
+
+Ananicy Cpp — Copyright (C) 2021 Antoine Viallon and contributors.
+Modifications in this fork — Copyright (C) 2026 WhitePeace36.
+
+This is a modified fork of [ananicy-cpp](https://gitlab.com/ananicy-cpp/ananicy-cpp).
+It is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version (`GPL-3.0-or-later`). See [LICENSE](LICENSE).
+The list of changes relative to upstream is the git history of this repository.
+
+Bundled third-party code keeps its own license:
+
+- `include/utility/atomic_queue/` — [atomic_queue](https://github.com/max0x7ba/atomic_queue),
+  Copyright (c) 2019 Maxim Egorushkin, MIT License (see `include/utility/atomic_queue/LICENSE`).
