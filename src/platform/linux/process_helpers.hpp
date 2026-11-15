@@ -1,16 +1,21 @@
 #pragma once
 
-#include <fstream> // for ifstream
-#include <string>  // for string
-#include <vector>  // for vector
+#include <fstream>  // for ifstream
+#include <iterator> // for istreambuf_iterator
+#include <string>   // for string
+#include <vector>   // for vector
 
 #include <fmt/format.h>
 
 namespace process_info {
 static std::vector<std::string> get_cmdline_from_pid(std::int32_t pid) {
-  std::string cmdline_value;
-  std::getline(std::ifstream(fmt::format("/proc/{}/cmdline", pid)),
-               cmdline_value);
+  // Read the whole file: arguments are separated by NUL and may themselves
+  // contain newlines (e.g. "python3 -c $'import x\nmain()' myapp"), so a
+  // std::getline() would cut the command line at the first '\n'.
+  std::ifstream     cmdline_file(fmt::format("/proc/{}/cmdline", pid),
+                                 std::ios::binary);
+  const std::string cmdline_value{std::istreambuf_iterator<char>(cmdline_file),
+                                  std::istreambuf_iterator<char>()};
   std::vector<std::string> cmdline;
 
   size_t start_pos;

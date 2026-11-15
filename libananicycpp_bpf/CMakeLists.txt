@@ -59,7 +59,10 @@ if(BPF_BUILD_LIBBPF)
         )
     endforeach()
 
-    set_target_properties(bpf PROPERTIES COMPILE_FLAGS "-g -O2 -Werror -Wall -std=gnu89 -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64")
+    # No -Werror for vendored third-party code: newer compilers and C
+    # libraries add warnings to it (e.g. glibc >= 2.42 const-correct strchr in
+    # libbpf.c), which would otherwise break every default BPF build.
+    set_target_properties(bpf PROPERTIES COMPILE_FLAGS "-g -O2 -Wall -std=gnu89 -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64")
 
     target_include_directories(bpf SYSTEM PUBLIC $<BUILD_INTERFACE:${libbpf_SOURCE_DIR}>)
     target_include_directories(bpf SYSTEM PUBLIC $<BUILD_INTERFACE:${libbpf_SOURCE_DIR}/src>)

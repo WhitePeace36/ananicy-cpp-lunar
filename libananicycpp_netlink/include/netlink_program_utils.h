@@ -21,6 +21,8 @@ void destroy_netlink_program(ananicy_cpp_netlink_t* obj);
 
 uint64_t netlink_program_get_timestamp(ananicy_cpp_netlink_t* obj);
 pid_t netlink_program_get_pid(ananicy_cpp_netlink_t* obj);
+/* enum proc_event::what of the last message (PROC_EVENT_FORK, _EXEC, ...) */
+uint32_t netlink_program_get_event_type(ananicy_cpp_netlink_t* obj);
 ssize_t netlink_program_pool_message(ananicy_cpp_netlink_t* obj);
 
 #ifdef __cplusplus

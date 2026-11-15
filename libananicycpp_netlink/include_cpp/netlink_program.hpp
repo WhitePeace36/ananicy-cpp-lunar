@@ -37,6 +37,7 @@ public:
   ssize_t pool_message() noexcept { return netlink_program_pool_message(m_netlink_program); }
 
   pid_t get_pid() const noexcept { return netlink_program_get_pid(m_netlink_program); }
+  std::uint32_t get_event_type() const noexcept { return netlink_program_get_event_type(m_netlink_program); }
   uint64_t get_timestamp() const noexcept { return netlink_program_get_timestamp(m_netlink_program); }
 
   //

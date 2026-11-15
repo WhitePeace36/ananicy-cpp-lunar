@@ -82,9 +82,19 @@ ananicy_cpp_netlink_t* initialize_netlink_program() {
     return NULL;
   }
   obj->nl_sock = connect_netlink_socket();
+  if (obj->nl_sock < 0) {
+    free(obj);
+    return NULL;
+  }
 
-  const int32_t listen_status = set_event_subscription(obj->nl_sock, true);
-  if (listen_status == 0) {
+  /* send() returns -1 on failure, never 0 for a non-empty message. Treating
+   * only 0 as failure (and not checking the socket at all) handed back a dead
+   * socket when socket() was refused (no CONFIG_CONNECTOR, seccomp, or a
+   * systemd RestrictAddressFamilies= sandbox), and the event loop then
+   * restarted and rescanned /proc forever. */
+  const ssize_t listen_status = set_event_subscription(obj->nl_sock, true);
+  if (listen_status <= 0) {
+    perror("set_event_subscription");
     close(obj->nl_sock);
     free(obj);
     return NULL;
@@ -111,18 +121,28 @@ pid_t netlink_program_get_pid(ananicy_cpp_netlink_t* obj) {
   struct proc_event proc_ev = obj->nl_cn_msg.proc_ev;
   switch (proc_ev.what) {
   case PROC_EVENT_FORK:
-    pid = proc_ev.event_data.fork.child_pid;
+    /* Only new processes, not new threads: priorities are applied to every
+     * thread in /proc/<pid>/task and inherited by threads created later.
+     * Same filter as the BPF backend. */
+    if (proc_ev.event_data.fork.child_pid == proc_ev.event_data.fork.child_tgid)
+      pid = proc_ev.event_data.fork.child_pid;
     break;
   case PROC_EVENT_EXEC:
     pid = proc_ev.event_data.exec.process_pid;
     break;
   case PROC_EVENT_COMM:
-    pid = proc_ev.event_data.comm.process_pid;
+    /* Process renames only; skip thread names (pthread_setname_np). */
+    if (proc_ev.event_data.comm.process_pid == proc_ev.event_data.comm.process_tgid)
+      pid = proc_ev.event_data.comm.process_pid;
     break;
   default:
     break; /* we don't care */
   }
   return pid;
+}
+
+uint32_t netlink_program_get_event_type(ananicy_cpp_netlink_t* obj) {
+  return (uint32_t)obj->nl_cn_msg.proc_ev.what;
 }
 
 ssize_t netlink_program_pool_message(ananicy_cpp_netlink_t* obj) {

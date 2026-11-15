@@ -44,12 +44,13 @@ _Beta status_
 - [nlohmann_json](https://github.com/nlohmann/json) 3.9+ _(can be automatically downloaded)_
 - C++ compiler compatible with C++20 (`g++ >= 10` or `clang++ >= 10`).
   Notably, `<concepts>` and `std::jthread` are required. Work is in progress to add support to `g++ ~= 9`, see https://gitlab.com/ananicy-cpp/ananicy-cpp/-/issues/28 for more info.
+- For the BPF process listener (the default, see `USE_BPF_PROC_IMPL` below):
+    - [bpf](https://www.kernel.org) (bpftool), and a kernel with BTF (`/sys/kernel/btf/vmlinux`)
+    - [libbpf](https://github.com/libbpf/libbpf)
+    - [libelf](https://sourceware.org/elfutils/)
+    - [clang](https://clang.llvm.org/) clang++ >= 10
 - _Optional_:
     - libsystemd (if you want systemd support)
-    - [bpf](https://www.kernel.org) _(required for bpf implementation)_
-    - [libbpf](https://github.com/libbpf/libbpf) _(required for bpf implementation)_
-    - [libelf](https://sourceware.org/elfutils/) _(required for bpf implementation)_
-    - [clang](https://clang.llvm.org/) clang++ >= 10 _(required for bpf implementation)_
 
 #### Debian/Ubuntu
 Install the prerequisites: `sudo apt install git cmake build-essential g++ libsystemd-dev`
@@ -70,7 +71,9 @@ The effects are mainly on the default compiler flags `ananicy-cpp` is built with
 - `USE_EXTERNAL_SPDLOG:BOOL`: Use system spdlog library,
 - `USE_EXTERNAL_FMTLIB:BOOL`: Use system fmtlib,
 - `ENABLE_SYSTEMD:BOOL`: Add systemd support,
-- `USE_BPF_PROC_IMPL:BOOL`: Use BPF for processing,
+- `USE_BPF_PROC_IMPL:BOOL`: Use BPF to get process events (default `ON`).
+  Set it to `OFF` to use the netlink proc connector instead, which needs neither BTF nor
+  a BPF toolchain (for older or minimal kernels). The listener is chosen at build time,
 - `BPF_BUILD_LIBBPF:BOOL`: Build libbpf instead of using system libary,
 - `STATIC:BOOL`: Build a static binary,
 
@@ -96,10 +99,11 @@ cmake --build build --target ananicy-cpp
 sudo cmake --install build --component Runtime
 ```
 
-- If using install-deps.sh and configure.sh (example using BPF_PROC_IMPL)
+- If using install-deps.sh and configure.sh (BPF listener, the default)
   - `git clone https://gitlab.com/ananicy-cpp/ananicy-cpp.git`
   - `cd ananicy-cpp`
-  - `env USE_BPF=ON ./install-deps.sh && ./configure.sh --use_bpf_proc && ./build.sh`
+  - `./install-deps.sh && ./configure.sh && ./build.sh`
+  - for the netlink listener instead: `env USE_BPF=OFF ./install-deps.sh && ./configure.sh --use_netlink_proc && ./build.sh`
   - `sudo cmake --install build/RelWithDebInfo --component Runtime`
 
 #### Service

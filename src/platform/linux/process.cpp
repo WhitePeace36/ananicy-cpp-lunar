@@ -11,6 +11,7 @@
 #include <cerrno>
 #endif
 
+#include <atomic>     // for atomic
 #include <filesystem> // for path
 #include <fstream>    // for ifstream
 #include <thread>     // for jthread
@@ -136,16 +137,22 @@ static std::int32_t handle_events(NetlinkProgram              *netlink_program,
       return EXIT_FAILURE;
     }
 
-    /// Don't add process to the queue,
-    /// if it's equal to the previous one.
+    /// Don't add an exact repeat of the previous event to the queue.
     /// @see: https://gitlab.com/ananicy-cpp/ananicy-cpp/-/issues/20
-    static pid_t prev_pid;
+    /// Compare the event type too: starting a program is a FORK of the child
+    /// followed by an EXEC of the *same* pid, and only the exec carries the
+    /// new program name. Deduplicating on the pid alone dropped that exec, so
+    /// the process was matched under its parent's name (e.g. "bash").
+    static pid_t         prev_pid;
+    static std::uint32_t prev_type;
 
-    const pid_t pid = netlink_program->get_pid();
-    if (pid == 0 || pid == prev_pid) {
+    const pid_t         pid = netlink_program->get_pid();
+    const std::uint32_t type = netlink_program->get_event_type();
+    if (pid == 0 || (pid == prev_pid && type == prev_type)) {
       continue;
     }
     prev_pid = pid;
+    prev_type = type;
 
     Process process{.pid = pid, .name = get_command_from_pid(pid)};
     spdlog::trace("Pushing new process: pid = {}", pid);
@@ -187,7 +194,8 @@ void ProcessQueue::start() {
 #endif
 
 std::string get_command_from_pid(pid_t pid) {
-  static std::uint32_t  exe_fail_count = 0;
+  // Called from both the event thread and the full scan.
+  static std::atomic<std::uint32_t> exe_fail_count = 0;
   static constexpr auto COMMAND_NAME_HEURISTIC_SKIP_EXE_FAILURES = 5;
 
   // Cmdline method
@@ -228,9 +236,11 @@ std::string get_command_from_pid(pid_t pid) {
 
       const fs::path exe_path = read_symlink(proc_path);
       auto           exe_name = exe_path.filename().string();
+      // A replaced binary (e.g. after a package update) reads as
+      // "name (deleted)"; strip the suffix *and* the space before it.
       const auto     exe_name_end = exe_name.find(" (deleted)");
       if (exe_name_end != std::string::npos) {
-        exe_name = exe_name.substr(0, exe_name_end + 1);
+        exe_name.resize(exe_name_end);
       }
       spdlog::trace("{}: exe filename: {}", __func__, exe_name);
 
@@ -239,7 +249,7 @@ std::string get_command_from_pid(pid_t pid) {
       return exe_name;
     } catch (const fs::filesystem_error &e) {
       const auto errcode = e.code().value();
-      if (errcode == EEXIST)
+      if (errcode == ENOENT || errcode == ESRCH) // process already gone
         return "<unknown>";
       else if (errcode == EACCES || errcode == EPERM)
         exe_fail_count++;
@@ -254,8 +264,9 @@ std::string get_command_from_pid(pid_t pid) {
     std::ifstream comm_file(fmt::format("/proc/{}/comm", pid));
     std::string   comm;
 
-    std::getline(comm_file, comm);
-    return comm;
+    if (std::getline(comm_file, comm) && !comm.empty()) {
+      return comm;
+    }
   } catch (const fs::filesystem_error &e) {
     spdlog::error(fmt::format("{}: filesystem error: {} (path: {})", __func__,
                               e.what(), std::string_view{e.path1().c_str()}));
@@ -291,7 +302,11 @@ void ProcessQueue::stop() noexcept {
 #if defined(USE_BPF_PROC_IMPL)
   g_exiting.store(true, std::memory_order_relaxed);
 #endif
-  if (!this->event_thread.get_stop_token().stop_requested()) {
+  // joinable(), not the stop token: when the listener failed to initialize,
+  // start() never ran, and join() on that empty jthread threw
+  // std::system_error from the noexcept destructor (std::terminate, core dump)
+  // instead of the clean "initialization failed" exit.
+  if (this->event_thread.joinable()) {
     this->event_thread.request_stop();
     this->event_thread.join();
   }

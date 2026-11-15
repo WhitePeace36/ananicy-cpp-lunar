@@ -31,7 +31,9 @@ Options:
   --path=, -p=                 Specify build path.
   --builddir=                  Specify build directory.
   --use_clang                  Use Clang compiler.
-  --use_bpf_proc               Use BPF as a proc listener.
+  --use_bpf_proc               Use BPF as a proc listener (default).
+  --use_netlink_proc           Use the netlink proc connector instead of BPF
+                               (for kernels without BTF or without a BPF toolchain).
   --enable_systemd             Enable systemd support.
   --enable_relocs              Build AnanicyCpp with relocs.
   --enable_tests               Enable AnanicyCpp tests.
@@ -55,7 +57,7 @@ _buildtype="RelWithDebInfo"
 _buildfolder="${_buildpath}/${_buildtype}"
 _external_flags=false
 _use_clang=false
-_use_bpf_proc=false
+_use_bpf_proc=true
 _enable_systemd=false
 _enable_relocs=false
 _enable_tests=false
@@ -97,6 +99,10 @@ for i in "$@"; do
       ;;
     --use_bpf_proc)
       _use_bpf_proc=true
+      shift # past argument=value
+      ;;
+    --use_netlink_proc)
+      _use_bpf_proc=false
       shift # past argument=value
       ;;
     --enable_systemd)
@@ -168,6 +174,8 @@ fi
 
 if ${_use_bpf_proc}; then
   _configure_flags+=('-DUSE_BPF_PROC_IMPL=ON')
+else
+  _configure_flags+=('-DUSE_BPF_PROC_IMPL=OFF')
 fi
 
 if ${_enable_systemd}; then

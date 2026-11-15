@@ -136,11 +136,16 @@ bool set_sched(pid_t pid, const std::string_view &sched_name,
                  "different behavior)");
     //    sched = SCHED_DEADLINE;
     //    param.sched_priority = 1;
+    // Leave the policy alone: falling through would call
+    // sched_setscheduler() with sched == 0, i.e. reset it to SCHED_OTHER.
+    return true;
   } else if (sched_name == "batch") {
     sched = SCHED_BATCH;
   } else {
-    spdlog::error("Invalid scheduler '{}'", __func__, sched_name);
-    return false;
+    spdlog::error("{}: Invalid scheduler '{}'", __func__, sched_name);
+    // A bad rule value is not a vanished process: returning false would make
+    // the worker skip the remaining attributes (ioclass, cgroup, cpuset...).
+    return true;
   }
   errno = 0;
   sched_setscheduler(pid, sched, &param);

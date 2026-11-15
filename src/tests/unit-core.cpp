@@ -5,10 +5,16 @@
 #include "core/cgroups.hpp"
 #include "core/rules.hpp"
 
+#include "core/process.hpp"
+#include "utility/process_info.hpp"
 #include "utility/utils.hpp"
 
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+#include <csignal>
+#include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 
 #include <spdlog/spdlog.h>
@@ -340,4 +346,33 @@ TEST_CASE("Rules")
     CHECK(rules.size() == 0);
     CHECK(!rules.has_cmdline_rules("java"));
   }
+}
+
+
+TEST_CASE("Process command line")
+{
+  // A real child whose arguments contain a newline: the command line must be
+  // read in full, not cut at the first '\n'.
+  const pid_t child = fork();
+  REQUIRE(child >= 0);
+  if (child == 0) {
+    execl("/bin/sh", "sh", "-c", "sleep 5; :", "first\nline", "cctest-tail",
+          static_cast<char *>(nullptr));
+    _exit(127);
+  }
+
+  const std::string expected = "sh -c sleep 5; : first\nline cctest-tail";
+  std::string       got;
+  for (int i = 0; i < 200 && got != expected; ++i) { // until it has exec'd
+    got = process_info::get_cmdline_string(static_cast<unsigned>(child));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  CHECK(got == expected);
+  CHECK(get_command_from_pid(child) == "sh");
+
+  kill(child, SIGKILL);
+  waitpid(child, nullptr, 0);
+
+  // Reaped: nothing to read, and no crash.
+  CHECK(process_info::get_cmdline_string(static_cast<unsigned>(child)).empty());
 }

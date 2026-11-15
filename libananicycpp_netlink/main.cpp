@@ -113,12 +113,17 @@ std::string get_process_cmdline(pid_t pid) noexcept {
 }
 
 void handle_event(const NetlinkProgram& program) {
-  static pid_t prev_pid;
-  pid_t pid = program.get_pid();
-  if (pid == 0 || pid == prev_pid) {
+  // Skip only an exact repeat (same pid *and* event type): a fork is
+  // followed by the exec of the same pid, and that exec carries the name.
+  static pid_t         prev_pid;
+  static std::uint32_t prev_type;
+  const pid_t          pid = program.get_pid();
+  const std::uint32_t  type = program.get_event_type();
+  if (pid == 0 || (pid == prev_pid && type == prev_type)) {
     return;
   }
   prev_pid = pid;
+  prev_type = type;
 
   const std::uint64_t timestamp = program.get_timestamp();
   const std::string proc_cmd = get_process_cmdline(pid);

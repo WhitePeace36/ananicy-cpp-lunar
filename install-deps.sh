@@ -31,10 +31,11 @@ fi
 # Special environment variable to be used to install needed dependencies,
 # for BPF implementation in order to compile and work.
 #
-# set this as environment variable to ON to activate this mode.
+# BPF is the default proc listener, so this is ON unless set to OFF
+# (USE_BPF=OFF for a netlink-only build, see configure.sh --use_netlink_proc).
 if [ x$USE_BPF = x ]
 then
-    USE_BPF=OFF
+    USE_BPF=ON
 fi
 
 if [ x$ENABLE_REGEX = x ]

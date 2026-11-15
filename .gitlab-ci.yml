@@ -13,7 +13,7 @@ build:
   script:
     - apt-get -y update
     - apt-get -y install build-essential cmake git libsystemd-dev libelf-dev bpftool llvm clang
-    - cmake -B build -DCMAKE_BUILD_TYPE=Release -DSTATIC=ON -DENABLE_SYSTEMD=OFF -S .
+    - cmake -B build -DCMAKE_BUILD_TYPE=Release -DSTATIC=ON -DENABLE_SYSTEMD=OFF -DUSE_BPF_PROC_IMPL=OFF -S .
     - cmake --build build -j
   artifacts:
     paths:
