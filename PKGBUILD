@@ -14,7 +14,6 @@ license=('GPL-3.0-or-later')
 depends=(fmt spdlog systemd-libs libelf zlib libbpf)
 makedepends=(git cmake ninja clang nlohmann-json bpf)
 optdepends=('ananicy-rules-custom: rules, types and cgroups from github.com/WhitePeace36/ananicy-rules')
-provides=(ananicy-cpp)
 conflicts=(ananicy-cpp)
 
 # makepkg's scratch directory is ./src next to the PKGBUILD, which here is the repository's own source tree:
@@ -38,6 +37,9 @@ _version() {
   fi
 }
 pkgver=$(_version)
+# With the version (1.4.0 of 1.4.0.r123.gabcdef0), so packages that need a newer ananicy-cpp, such as
+# ananicy-rules-custom (depends on ananicy-cpp>=1.4.0 for /usr/share/ananicy.d), accept this one.
+provides=("ananicy-cpp=${pkgver%%.r*}")
 
 prepare() {
   # Last line of defence, in case a makepkg version picks the scratch directory before reading this file.
