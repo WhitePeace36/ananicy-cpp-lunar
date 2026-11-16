@@ -4,21 +4,25 @@
 #   makepkg -si
 #
 # The package replaces the repo's ananicy-cpp (binary in /usr/bin, service in /usr/lib/systemd/system).
+# It is the same package as LunarOs' ananicy-cpp-lunar (built there from the release tag v<version>);
+# a local build is <version>.r<count>.g<hash>, newer than that release. ananicy-cpp-wp is this
+# package's old name.
 
-pkgname=ananicy-cpp-wp
+pkgname=ananicy-cpp-lunar
 pkgrel=1
-pkgdesc="Ananicy rewritten in C++ (local build with fork/rename/scan fixes)"
+pkgdesc='Ananicy rewritten in C++ - Lunar build of the WhitePeace36 fork'
 arch=(x86_64)
-url="https://github.com/WhitePeace36/ananicy-cpp"
+url="https://github.com/WhitePeace36/ananicy-cpp-lunar"
 license=('GPL-3.0-or-later')
 depends=(fmt spdlog systemd-libs libelf zlib libbpf)
 makedepends=(git cmake ninja clang nlohmann-json bpf)
-optdepends=('ananicy-rules-custom: rules, types and cgroups from github.com/WhitePeace36/ananicy-rules')
-conflicts=(ananicy-cpp)
+optdepends=('lunar-ananicy-rules: rules tuned for the Elara scheduler (github.com/WhitePeace36/ananicy-rules)')
+conflicts=(ananicy-cpp ananicy-cpp-wp)
+replaces=(ananicy-cpp ananicy-cpp-wp)
 
 # makepkg's scratch directory is ./src next to the PKGBUILD, which here is the repository's own source tree:
 # `makepkg -c` or `-C` would delete it. makepkg reads this file before it picks that directory, so point it
-# elsewhere: .makepkg/ananicy-cpp-wp/{src,pkg}. A BUILDDIR set in makepkg.conf is left alone.
+# elsewhere: .makepkg/ananicy-cpp-lunar/{src,pkg}. A BUILDDIR set in makepkg.conf is left alone.
 if [[ $BUILDDIR -ef $startdir ]]; then
   BUILDDIR="$startdir/.makepkg"
 fi
@@ -38,7 +42,7 @@ _version() {
 }
 pkgver=$(_version)
 # With the version (1.4.0 of 1.4.0.r123.gabcdef0), so packages that need a newer ananicy-cpp, such as
-# ananicy-rules-custom (depends on ananicy-cpp>=1.4.0 for /usr/share/ananicy.d), accept this one.
+# lunar-ananicy-rules (depends on ananicy-cpp>=1.4.0 for /usr/share/ananicy.d), accept this one.
 provides=("ananicy-cpp=${pkgver%%.r*}")
 
 prepare() {
