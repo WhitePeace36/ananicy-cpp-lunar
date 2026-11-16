@@ -655,6 +655,22 @@ TEST_CASE("cmdline_contains rules with the same texts replace each other")
   CHECK(layered.get_rule("java", "java -jar minecraft.jar")["nice"] == 3);
 }
 
+TEST_CASE("ioclass none: the I/O priority follows the CPU priority again")
+{
+  spdlog::set_level(spdlog::level::off);
+  // IOPRIO_WHO_PROCESS = 1; the class is in the bits above IOPRIO_CLASS_SHIFT (13)
+  const auto io_class = [] {
+    return syscall(SYS_ioprio_get, 1, static_cast<int>(syscall(SYS_gettid))) >> 13;
+  };
+  // idle and none need no privileges
+  REQUIRE(priority::set_io_priority(getpid(), "idle", 0));
+  CHECK(io_class() == 3);
+  // used to log "IO priority is invalid" and change nothing; an "ionice"
+  // level next to it is ignored, the kernel only accepts level 0
+  CHECK(priority::set_io_priority(getpid(), "none", 7));
+  CHECK(io_class() == 0);
+}
+
 TEST_CASE("Packaged ananicy.conf, keys in /etc/ananicy.d/ananicy.conf win")
 {
   spdlog::set_level(spdlog::level::off);

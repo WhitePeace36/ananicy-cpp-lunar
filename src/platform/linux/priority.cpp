@@ -48,7 +48,15 @@ bool set_io_priority(pid_t pid, const std::string_view &io_class,
   } else if (io_class == "idle") {
     io_class_value = IOPRIO_CLASS_IDLE;
   } else if (io_class == "none") {
+    // No class of its own: the I/O priority follows the CPU priority again
+    // (best-effort at level (nice + 20) / 5, idle for SCHED_IDLE tasks), like
+    // `ionice -c none`. The kernel only accepts it with level 0.
     io_class_value = IOPRIO_CLASS_NONE;
+    if (value != 0) {
+      spdlog::debug("ioclass \"none\" has no level, ignoring ionice {}",
+                    value);
+      value = 0;
+    }
   } else {
     spdlog::error("Unknown io class {}, skipping...", io_class);
     return true;
@@ -56,7 +64,8 @@ bool set_io_priority(pid_t pid, const std::string_view &io_class,
 
   const std::int32_t io_prio = IOPRIO_PRIO_VALUE(io_class_value, value);
 
-  if (!ioprio_valid(io_prio)) {
+  // ioprio_valid() rejects class "none", which is valid to set (see above).
+  if (io_class_value != IOPRIO_CLASS_NONE && !ioprio_valid(io_prio)) {
     spdlog::error("IO priority is invalid, skipping...");
     return true;
   }
