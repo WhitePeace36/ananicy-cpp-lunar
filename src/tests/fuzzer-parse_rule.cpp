@@ -15,10 +15,10 @@ static std::unique_ptr<Rules> g_rules{nullptr};
 void do_initialization() noexcept {
   spdlog::set_level(spdlog::level::off);
   if (!g_conf) {
-      g_conf = std::make_unique<Config>(config_path);
+      g_conf = std::make_unique<Config>(config_path, "");
   }
   if (!g_rules) {
-      g_rules = std::make_unique<Rules>("", g_conf.get());
+      g_rules = std::make_unique<Rules>("", g_conf.get(), "");
   }
 }
 

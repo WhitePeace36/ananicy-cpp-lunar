@@ -34,8 +34,9 @@ static std::string trim(const std::string &str) {
   return str.substr(first, (last - first + 1));
 }
 
-Config::Config(const std::filesystem::path &config_path)
-    : m_config_path(config_path) {
+Config::Config(const std::filesystem::path &config_path,
+               const std::filesystem::path &vendor_config_path)
+    : m_config_path(config_path), m_vendor_config_path(vendor_config_path) {
   config = {};
 
   for (const auto &item : default_config) {
@@ -47,7 +48,17 @@ Config::Config(const std::filesystem::path &config_path)
   // Testing latency nice support.
   config["apply_latnice"] = latnice_support_status;
 
-  if (!exists(config_path)) {
+  // With packaged settings, a missing config_path just means nothing was
+  // changed: writing all defaults there would override every packaged value.
+  std::error_code ec;
+  const bool has_vendor = !vendor_config_path.empty() &&
+                          std::filesystem::is_regular_file(vendor_config_path, ec) &&
+                          !std::filesystem::equivalent(vendor_config_path, config_path, ec);
+  if (!has_vendor) {
+    m_vendor_config_path.clear();
+  }
+
+  if (!exists(config_path) && !has_vendor) {
     spdlog::error(fmt::format("{}: file {} does not exist", __func__,
                               std::string_view{config_path.c_str()}));
 
@@ -71,10 +82,8 @@ Config::Config(const std::filesystem::path &config_path)
   this->reload();
 }
 
-void Config::reload() noexcept {
-  const auto latnice_support_status = priority::test_latnice_support();
-
-  std::ifstream is_file{m_config_path};
+void Config::read_file(const std::filesystem::path &path) {
+  std::ifstream is_file{path};
 
   std::string line;
   while (std::getline(is_file, line)) {
@@ -87,6 +96,24 @@ void Config::reload() noexcept {
       }
     }
   }
+}
+
+void Config::reload() noexcept {
+  const auto latnice_support_status = priority::test_latnice_support();
+
+  // Start from the built-in defaults, so a key removed from a file since the
+  // last load goes back to its packaged or default value.
+  config.clear();
+  for (const auto &item : default_config) {
+    config[std::string(item.first)] = item.second;
+  }
+  config["apply_latnice"] = latnice_support_status;
+
+  // Packaged settings first; keys in the configuration file win.
+  if (!m_vendor_config_path.empty()) {
+    read_file(m_vendor_config_path);
+  }
+  read_file(m_config_path);
 
   // Disable latency nice if not supported by the kernel.
   const bool is_latnice_supported = latnice_support_status == "true";

@@ -156,7 +156,7 @@ TEST_CASE("Config")
 
   SECTION("Check if config is correctly set according to the file")
   {
-    Config conf(config_path);
+    Config conf(config_path, "");
 
     const bool is_latnice_supported = priority::test_latnice_support() == "true";
     const bool apply_latnice = is_latnice_supported ? conf.apply_latnice() : false;
@@ -196,10 +196,10 @@ TEST_CASE("Rules")
   static constexpr std::string_view config_path = (TEST_DIR "test-rulesconfig.txt");
   spdlog::set_level(spdlog::level::off);
 
-  Config conf(config_path);
+  Config conf(config_path, "");
   SECTION("Load rule from string")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     REQUIRE(rules.size() == 0);
 
     // Check if type was loaded successfully.
@@ -241,7 +241,7 @@ TEST_CASE("Rules")
 
   SECTION("Whitespace-only lines are skipped")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     CHECK(!rules.load_rule_from_string("      "));
     CHECK(!rules.load_rule_from_string("\t\t\t"));
     CHECK(!rules.load_rule_from_string("  \t  \t  "));
@@ -251,7 +251,7 @@ TEST_CASE("Rules")
 
   SECTION("Trailing carriage return is handled")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     CHECK(!rules.load_rule_from_string("\r"));
     CHECK(!rules.load_rule_from_string("   \r"));
     CHECK(!rules.load_rule_from_string("# this is a comment\r"));
@@ -263,7 +263,7 @@ TEST_CASE("Rules")
 
   SECTION("Nested JSON objects parse correctly")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     CHECK(rules.load_rule_from_string("{ \"name\": \"nested\", \"type\": \"Game\", \"extra\": { \"key\": \"val\" } }"));
     CHECK(!rules.get_rule("nested").is_null());
     CHECK(rules.size() == 1);
@@ -271,7 +271,7 @@ TEST_CASE("Rules")
 
   SECTION("Load rules from CRLF file")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     // Write a temp rules file with Windows line endings
     const fs::path tmp_path = fs::temp_directory_path() / "test-crlf.rules";
     {
@@ -290,7 +290,7 @@ TEST_CASE("Rules")
 
   SECTION("cmdline_contains rules")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     CHECK(rules.load_rule_from_string("{ \"type\": \"Game\", \"nice\": -5, \"ioclass\": \"best-effort\" }"));
     CHECK(rules.load_rule_from_string("{ \"name\": \"java\", \"nice\": 3 }"));
     CHECK(rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": \"minecraft\", \"type\": \"Game\" }"));
@@ -323,7 +323,7 @@ TEST_CASE("Rules")
 
   SECTION("cmdline_contains without a plain name rule")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     CHECK(rules.load_rule_from_string("{ \"name\": \"python3\", \"cmdline_contains\": \"jupyter-lab\", \"nice\": 5 }"));
     CHECK(rules.get_rule("python3", "/usr/bin/python3 /usr/bin/jupyter-lab")["nice"] == 5);
     CHECK(rules.get_rule("python3", "python3 script.py").is_null());
@@ -332,7 +332,7 @@ TEST_CASE("Rules")
 
   SECTION("cmdline_contains alone does nothing")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     CHECK(!rules.load_rule_from_string("{ \"cmdline_contains\": \"minecraft\", \"nice\": -5 }"));
     // Must not be taken as a (re)definition of type Game.
     CHECK(!rules.load_rule_from_string("{ \"type\": \"Game\", \"cmdline_contains\": \"minecraft\", \"nice\": -5 }"));
@@ -343,7 +343,7 @@ TEST_CASE("Rules")
 
   SECTION("cmdline_contains invalid values")
   {
-    Rules rules("", &conf);
+    Rules rules("", &conf, "");
     CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": \"\" }"));
     CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": [] }"));
     CHECK(!rules.load_rule_from_string("{ \"name\": \"java\", \"cmdline_contains\": [\"a\", 1] }"));
@@ -532,7 +532,7 @@ TEST_CASE("Rule files load in sorted order")
 {
   spdlog::set_level(spdlog::level::off);
   static constexpr std::string_view config_path = (TEST_DIR "test-rulesconfig.txt");
-  Config conf(config_path);
+  Config conf(config_path, "");
 
   const fs::path dir = fs::temp_directory_path() / fmt::format("ananicy-order-{}", getpid());
   fs::remove_all(dir);
@@ -544,8 +544,147 @@ TEST_CASE("Rule files load in sorted order")
   std::ofstream(dir / "50-mid.rules")     << "{\"name\": \"dup\", \"nice\": 5}\n";
   std::ofstream(dir / "99-local.rules")   << "{\"name\": \"dup\", \"nice\": 9}\n";
 
-  Rules rules(dir, &conf);
+  Rules rules(dir, &conf, "");
   CHECK(rules.get_rule("dup")["nice"] == 9); // 99-local sorts last, so it wins
   CHECK(rules.size() == 1);
   fs::remove_all(dir);
+}
+
+namespace {
+// A fresh directory in /tmp, removed again when the test ends.
+struct TempDir {
+  fs::path path;
+  explicit TempDir(std::string_view name)
+      : path(fs::temp_directory_path() /
+             fmt::format("ananicy-{}-{}", name, getpid())) {
+    fs::remove_all(path);
+    fs::create_directories(path);
+  }
+  ~TempDir() { fs::remove_all(path); }
+};
+
+void write_text(const fs::path &file, std::string_view text) {
+  fs::create_directories(file.parent_path());
+  std::ofstream(file) << text;
+}
+} // namespace
+
+TEST_CASE("Packaged rules load first, /etc/ananicy.d wins")
+{
+  spdlog::set_level(spdlog::level::off);
+  static constexpr std::string_view config_path = (TEST_DIR "test-rulesconfig.txt");
+  Config conf(config_path, "");
+  TempDir vendor("vendor"), etc("etc");
+
+  write_text(vendor.path / "99-types.types",
+             "{\"type\": \"Game\", \"nice\": -3}\n");
+  write_text(vendor.path / "99-rules/Game.rules",
+             "{\"name\": \"steam\", \"type\": \"Game\"}\n"
+             "{\"name\": \"lutris\", \"nice\": 2}\n"
+             "{\"name\": \"untouched\", \"nice\": 4}\n");
+  // sorts after everything in /etc, but /etc still wins: it is loaded later
+  write_text(vendor.path / "zz-last.rules", "{\"name\": \"late\", \"nice\": 1}\n");
+
+  write_text(etc.path / "99-rules/Game.rules",
+             "{\"name\": \"steam\", \"type\": \"Game\", \"nice\": -9}\n" // changed
+             "{\"name\": \"lutris\"}\n");                                // switched off
+  write_text(etc.path / "00-first.rules",
+             "{\"name\": \"late\", \"nice\": 7}\n"
+             "{\"name\": \"mine\", \"nice\": 5}\n");                     // only in /etc
+
+  Rules rules(etc.path, &conf, vendor.path);
+  CHECK(rules.get_rule("steam")["nice"] == -9);
+  CHECK(rules.get_rule("steam")["type"] == "Game");
+  CHECK_FALSE(rules.get_rule("lutris").contains("nice"));
+  CHECK(rules.get_rule("untouched")["nice"] == 4);
+  CHECK(rules.get_rule("late")["nice"] == 7);
+  CHECK(rules.get_rule("mine")["nice"] == 5);
+
+  // an overridden type changes every rule that uses it
+  write_text(etc.path / "99-types.types", "{\"type\": \"Game\", \"nice\": -1}\n");
+  write_text(vendor.path / "99-rules/Game.rules", "{\"name\": \"game\", \"type\": \"Game\"}\n");
+  Rules with_type(etc.path, &conf, vendor.path);
+  CHECK(with_type.get_rule("game")["nice"] == -1);
+}
+
+TEST_CASE("Packaged rules without /etc/ananicy.d, and /etc alone")
+{
+  spdlog::set_level(spdlog::level::off);
+  static constexpr std::string_view config_path = (TEST_DIR "test-rulesconfig.txt");
+  Config conf(config_path, "");
+  TempDir vendor("vendor-only"), etc("etc-only");
+  write_text(vendor.path / "a.rules", "{\"name\": \"packaged\", \"nice\": 3}\n");
+  write_text(etc.path / "a.rules", "{\"name\": \"local\", \"nice\": 6}\n");
+
+  Rules vendor_only(etc.path / "missing", &conf, vendor.path);
+  CHECK(vendor_only.get_rule("packaged")["nice"] == 3);
+
+  Rules etc_only(etc.path, &conf, vendor.path / "missing");
+  CHECK(etc_only.get_rule("local")["nice"] == 6);
+  CHECK(etc_only.get_rule("packaged").is_null());
+
+  // the same directory given twice is read once
+  Rules same(etc.path, &conf, etc.path);
+  CHECK(same.size() == 1);
+}
+
+TEST_CASE("cmdline_contains rules with the same texts replace each other")
+{
+  spdlog::set_level(spdlog::level::off);
+  static constexpr std::string_view config_path = (TEST_DIR "test-rulesconfig.txt");
+  Config conf(config_path, "");
+
+  Rules rules("", &conf, "");
+  rules.load_rule_from_string(R"({"name": "java", "cmdline_contains": ["-jar", "a.jar"], "nice": 1})");
+  rules.load_rule_from_string(R"({"name": "java", "cmdline_contains": "b.jar", "nice": 2})");
+  // same texts in another order: replaces the first rule as if that one had
+  // never been loaded, so it is now tried after the b.jar rule
+  rules.load_rule_from_string(R"({"name": "java", "cmdline_contains": ["a.jar", "-jar"], "nice": 9})");
+  CHECK(rules.size() == 2);
+  CHECK(rules.get_rule("java", "java -jar a.jar")["nice"] == 9);
+  CHECK(rules.get_rule("java", "java -jar a.jar b.jar")["nice"] == 2); // b.jar comes first now
+  CHECK(rules.get_rule("java", "java -jar b.jar")["nice"] == 2);
+
+  TempDir vendor("vendor-cmd"), etc("etc-cmd");
+  write_text(vendor.path / "j.rules",
+             "{\"name\": \"java\", \"cmdline_contains\": \"minecraft\", \"nice\": -5}\n");
+  write_text(etc.path / "j.rules",
+             "{\"name\": \"java\", \"cmdline_contains\": \"minecraft\", \"nice\": 3}\n");
+  Rules layered(etc.path, &conf, vendor.path);
+  CHECK(layered.size() == 1);
+  CHECK(layered.get_rule("java", "java -jar minecraft.jar")["nice"] == 3);
+}
+
+TEST_CASE("Packaged ananicy.conf, keys in /etc/ananicy.d/ananicy.conf win")
+{
+  spdlog::set_level(spdlog::level::off);
+  TempDir dir("conf");
+  const fs::path vendor_conf = dir.path / "vendor.conf";
+  const fs::path etc_conf    = dir.path / "etc.conf";
+  write_text(vendor_conf, "check_freq = 10\napply_nice = false\nloglevel = debug\n");
+
+  {
+    // nothing changed by the user: no file is written, packaged values apply
+    Config conf(etc_conf, vendor_conf);
+    CHECK_FALSE(fs::exists(etc_conf));
+    CHECK(conf.check_freq().count() == 10);
+    CHECK_FALSE(conf.apply_nice());
+  }
+
+  write_text(etc_conf, "check_freq = 30\n");
+  Config conf(etc_conf, vendor_conf);
+  CHECK(conf.check_freq().count() == 30);           // from /etc
+  CHECK_FALSE(conf.apply_nice());                    // packaged
+  CHECK(conf.loglevel() == spdlog::level::debug);    // packaged
+
+  write_text(etc_conf, "apply_nice = true\n");      // check_freq back to packaged
+  conf.reload();
+  CHECK(conf.check_freq().count() == 10);
+  CHECK(conf.apply_nice());
+
+  // without packaged settings, a missing file is still created with defaults
+  const fs::path fresh = dir.path / "fresh.conf";
+  Config defaults(fresh, dir.path / "missing.conf");
+  CHECK(fs::exists(fresh));
+  CHECK(defaults.check_freq().count() == 60);
 }

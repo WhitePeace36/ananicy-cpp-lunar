@@ -24,11 +24,26 @@ namespace fs = std::filesystem;
 
 using nlohmann::json;
 
-Rules::Rules(const fs::path &ruleset_directory, Config *config_src)
+Rules::Rules(const fs::path &ruleset_directory, Config *config_src,
+             const fs::path &vendor_directory)
     : m_config(config_src) {
+  // Packaged rules first, then the configuration directory: whatever is
+  // defined there replaces the packaged definition of the same name.
+  std::error_code ec;
+  const bool      has_vendor = !vendor_directory.empty() &&
+                          fs::is_directory(vendor_directory, ec) &&
+                          !fs::equivalent(vendor_directory, ruleset_directory, ec);
+  if (has_vendor) {
+    spdlog::info("Loading packaged rules from {}",
+                 std::string_view{vendor_directory.c_str()});
+    m_vendor_prefix = (vendor_directory / "").string();
+    load_rules_from_directory(vendor_directory);
+  }
   if (!exists(ruleset_directory)) {
-    spdlog::error(fmt::format("{}: directory {} does not exist", __func__,
-                              std::string_view{ruleset_directory.c_str()}));
+    if (!has_vendor) {
+      spdlog::error(fmt::format("{}: directory {} does not exist", __func__,
+                                std::string_view{ruleset_directory.c_str()}));
+    }
     return;
   }
   load_rules_from_directory(ruleset_directory);
@@ -101,8 +116,27 @@ bool Rules::load_rule_from_string(const std::string_view &line) {
         return false;
       }
 
-      m_cmdline_rules[rule["name"].get<std::string>()].push_back(
-          {std::move(needles), rule});
+      // A rule for the same name with the same texts (in any order) replaces
+      // the earlier one, like a redefined plain rule does: the earlier one is
+      // dropped as if it had never been loaded, and the new one takes its own
+      // place in the load order. Without that, a rule in /etc/ananicy.d could
+      // never override a packaged cmdline rule (the first match wins).
+      std::sort(needles.begin(), needles.end());
+      needles.erase(std::unique(needles.begin(), needles.end()), needles.end());
+      const std::string name = rule["name"].get<std::string>();
+      const std::string key =
+          fmt::format("{} [cmdline: {}]", name, json(needles).dump());
+      auto &candidates = m_cmdline_rules[name];
+      const auto same = std::find_if(
+          candidates.begin(), candidates.end(),
+          [&](const auto &candidate) { return candidate.needles == needles; });
+      if (same != candidates.end()) {
+        note_definition("name", key);
+        candidates.erase(same);
+      } else {
+        note_definition("", "name:" + key);
+      }
+      candidates.push_back({std::move(needles), rule});
       return true;
     }
 
@@ -168,11 +202,21 @@ void Rules::note_definition(std::string_view kind, const std::string &key) {
   }
   const std::string full_key = fmt::format("{}:{}", kind, key);
   const auto        previous = m_rule_sources.find(full_key);
-  spdlog::warn("{} rule '{}' from {} replaces the one from {} (the last one "
-               "loaded wins)",
-               kind, key, here,
-               previous != m_rule_sources.end() ? previous->second
-                                                : std::string{"<unknown>"});
+  const std::string before   = previous != m_rule_sources.end()
+                                   ? previous->second
+                                   : std::string{"<unknown>"};
+  const auto in_vendor = [this](const std::string &source) {
+    return !m_vendor_prefix.empty() && source.starts_with(m_vendor_prefix);
+  };
+  if (in_vendor(before) && !in_vendor(here)) {
+    // the configuration directory changing a packaged definition: intended
+    spdlog::info("{} rule '{}' from {} overrides the packaged one from {}",
+                 kind, key, here, before);
+  } else {
+    spdlog::warn("{} rule '{}' from {} replaces the one from {} (the last "
+                 "one loaded wins)",
+                 kind, key, here, before);
+  }
   m_rule_sources[full_key] = here;
 }
 

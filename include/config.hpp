@@ -29,7 +29,15 @@ class Config {
   }
 
 public:
-  explicit Config(const std::filesystem::path &config_path);
+  /// Settings shipped by a distribution package. Read before config_path,
+  /// so every key set in config_path (/etc/ananicy.d/ananicy.conf) wins and
+  /// that file only needs the keys someone changed.
+  static constexpr std::string_view default_vendor_config_path =
+      "/usr/share/ananicy.d/ananicy.conf";
+
+  explicit Config(const std::filesystem::path &config_path,
+                  const std::filesystem::path &vendor_config_path =
+                      default_vendor_config_path);
 
   bool apply_nice() { return check_rule("apply_nice"); }
   bool apply_latnice() { return check_rule("apply_latnice"); }
@@ -86,6 +94,9 @@ public:
 private:
   ConfigMap             config;
   std::filesystem::path m_config_path{};
+  std::filesystem::path m_vendor_config_path{};
+
+  void read_file(const std::filesystem::path &path);
 };
 
 #endif // ANANICY_CPP_CONFIG_HPP

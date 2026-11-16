@@ -44,6 +44,10 @@ private:
   /// where each name/type/cgroup rule came from, to report redefinitions.
   std::string                                  m_current_source{};
   std::unordered_map<std::string, std::string> m_rule_sources{};
+  /// The packaged directory with a trailing '/', empty if none was loaded.
+  /// Replacing a definition from there is the normal way to change it, so it
+  /// is logged as info instead of a duplicate warning.
+  std::string m_vendor_prefix{};
   void note_definition(std::string_view kind, const std::string &key);
 
 #ifdef ENABLE_REGEX_SUPPORT
@@ -51,8 +55,17 @@ private:
 #endif
 
 public:
+  /// Rules shipped by a distribution package. Loaded before the
+  /// configuration directory (/etc/ananicy.d), so every rule, type and cgroup
+  /// defined there replaces the packaged one of the same name. If it does not
+  /// exist, only the configuration directory is read.
+  static constexpr std::string_view default_vendor_directory =
+      "/usr/share/ananicy.d";
+
   explicit Rules(const std::filesystem::path &ruleset_directory,
-                 Config                      *config_src);
+                 Config                      *config_src,
+                 const std::filesystem::path &vendor_directory =
+                     default_vendor_directory);
   bool load_rule_from_string(const std::string_view &line);
   void load_rules_from_file(const std::filesystem::path &path);
   void load_rules_from_directory(const std::filesystem::path &dir_path);

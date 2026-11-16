@@ -178,8 +178,13 @@ There is also binaries in `cachyos` and `chaotic-aur`, although `ananicy-cpp` is
 
 ### Global configuration
 
-Global settings are defined in `/etc/ananicy.d/ananicy-cpp.conf` (or the path set via `ANANICY_CPP_CONF`).
+Global settings are defined in `/etc/ananicy.d/ananicy.conf` (or the path set via `ANANICY_CPP_CONF`).
 Format is `key=value`, one per line.
+
+If a distribution package ships `/usr/share/ananicy.d/ananicy.conf`, that file is read
+first and every key set in `/etc/ananicy.d/ananicy.conf` wins, so the latter only needs
+the keys you changed. Without a packaged file, a missing `/etc/ananicy.d/ananicy.conf`
+is created with the defaults below.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -259,23 +264,41 @@ Or to pin to specific cores directly:
 
 You can then (re)start `ananicy-cpp.service`.
 
+#### Packaged rules (`/usr/share/ananicy.d`)
+
+A distribution package can install its rules, types and cgroups (and `ananicy.conf`, see
+above) to `/usr/share/ananicy.d`. That directory is loaded **before** `/etc/ananicy.d`,
+so package updates can replace it completely while your own files stay untouched:
+
+- To change a packaged rule, define the same `name` (or `type`, `cgroup`) in
+  `/etc/ananicy.d`. Your definition replaces the packaged one entirely.
+- To switch a packaged rule off, define it with nothing else:
+  `{"name": "steam"}`. A `cmdline_contains` rule is switched off the same way, with
+  the same `cmdline_contains` texts.
+- Packaged rules you did not override keep getting the package's updates.
+
+If `/usr/share/ananicy.d` does not exist, only `/etc/ananicy.d` is read, as before.
+
 #### Load order and duplicate rules
 
-All `.rules`, `.types` and `.cgroups` files below the configuration directory
-(subdirectories included) are loaded in **sorted path order**. `00-default/…` loads
+All `.rules`, `.types` and `.cgroups` files below `/usr/share/ananicy.d`, then all below
+the configuration directory (subdirectories included) are loaded, each directory in
+**sorted path order**. `00-default/…` loads
 before `50-community/…`, which loads before `99-local.rules`. Lines within a file are
 read top to bottom.
 
 If the same `name`, `type` or `cgroup` is defined more than once, the one loaded last
-wins, and a warning names both files:
+wins, and a warning names both files (when `/etc/ananicy.d` overrides a packaged
+definition from `/usr/share/ananicy.d`, which is intended, it is logged as info):
 
 ~~~
 [warning] name rule 'gcc' from /etc/ananicy.d/99-local.rules replaces the one from /etc/ananicy.d/00-default/compilers.rules (the last one loaded wins)
 ~~~
 
 To override a community rule, put your version in a file that sorts later, e.g.
-`/etc/ananicy.d/99-local.rules`. `cmdline_contains` rules are not replaced this way:
-several can exist for the same name (see below).
+`/etc/ananicy.d/99-local.rules`. A `cmdline_contains` rule is only replaced by one with
+the same `name` and the same texts (in any order); rules with other texts for the same
+name coexist (see below).
 
 #### Rules for specific Java, Python, … programs
 
@@ -296,6 +319,8 @@ case-sensitive) for the rule to apply:
   duplicate rules" above), and the
   first one that matches wins. If none matches, the plain rule with the same `name`
   is used (if there is one). Several rules for the same name can therefore coexist.
+  A later rule with the same `name` and the same texts replaces the earlier one, as if
+  that one had never been loaded (the later rule keeps its own place in the load order).
 - `cmdline_contains` requires `name`. Without it (on its own, or on a `type`/`cgroup`
   line) the line is ignored with a warning.
 - The command line is only read for names that have `cmdline_contains` rules, so other
