@@ -704,3 +704,42 @@ TEST_CASE("Packaged ananicy.conf, keys in /etc/ananicy.d/ananicy.conf win")
   CHECK(fs::exists(fresh));
   CHECK(defaults.check_freq().count() == 60);
 }
+
+
+TEST_CASE("Rewritten process titles are named after the program")
+{
+  // setproctitle style: the whole command line in argv[0]
+  CHECK(title_program_name("/opt/brave-bin/brave --type=zygote --crashpad-handler-pid=35099",
+                           "/opt/brave-bin/brave") == "brave");
+  CHECK(title_program_name("/bin/brave --type=renderer", "/usr/bin/brave") == "brave"); // symlinked path
+  CHECK(title_program_name("avahi-daemon: running [host.local]", "") == "avahi-daemon");
+  CHECK(title_program_name("sshd-session: user@pts/0", "") == "sshd-session"); // was "0"
+  CHECK(title_program_name("sshd -D [listener] 0 of 10-100 startups", "") == "sshd");
+  // a real path with spaces keeps the old handling
+  CHECK(!title_program_name("/games/My Game/game", "/games/My Game/game"));
+  CHECK(!title_program_name("/games/My Game/game --fullscreen", ""));
+  // Wine paths are handled by the ".exe" rule
+  CHECK(!title_program_name("C:\\Program Files\\Game\\game.exe", ""));
+  // no title at all
+  CHECK(!title_program_name("/usr/bin/bash", "/usr/bin/bash"));
+  CHECK(!title_program_name(" leading", ""));
+}
+
+TEST_CASE("A process with a rewritten title gets the program name")
+{
+  const pid_t child = fork();
+  REQUIRE(child >= 0);
+  if (child == 0) {
+    execl("/bin/sleep", "/bin/sleep --type=zygote --pid=123", "5", static_cast<char *>(nullptr));
+    _exit(127);
+  }
+  std::string cmdline;
+  for (int i = 0; i < 200 && cmdline.find("zygote") == std::string::npos; ++i) {
+    cmdline = process_info::get_cmdline_string(static_cast<unsigned>(child));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  CHECK(get_command_from_pid(child) == "sleep"); // was "sleep --type=zygote --pid=123"
+
+  kill(child, SIGKILL);
+  waitpid(child, nullptr, 0);
+}

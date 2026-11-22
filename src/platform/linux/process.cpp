@@ -228,6 +228,41 @@ void ProcessQueue::start() {
 
 #endif
 
+std::optional<std::string> title_program_name(std::string_view argv0,
+                                              std::string_view exe_path) {
+  if (argv0.ends_with(".exe")) // Wine path, e.g. "C:\\Program Files\\x.exe"
+    return std::nullopt;
+  const auto space = argv0.find(' ');
+  if (space == std::string_view::npos)
+    return std::nullopt;
+  std::string_view head = argv0.substr(0, space);
+  if (head.ends_with(':'))
+    head.remove_suffix(1);
+  if (head.empty())
+    return std::nullopt;
+  const auto slash = head.find_last_of('/');
+  if (slash == std::string_view::npos)
+    return std::string{head};
+  // compare file names: argv[0] may reach the binary through a symlink
+  const std::string_view name = head.substr(slash + 1);
+  const auto exe_slash = exe_path.find_last_of('/');
+  if (name.empty() || exe_slash == std::string_view::npos ||
+      name != exe_path.substr(exe_slash + 1))
+    return std::nullopt;
+  return std::string{name};
+}
+
+static std::string exe_target(pid_t pid) {
+  std::error_code ec;
+  std::string     target =
+      fs::read_symlink(fmt::format("/proc/{}/exe", pid), ec).string();
+  if (ec)
+    return {};
+  if (const auto d = target.find(" (deleted)"); d != std::string::npos)
+    target.resize(d);
+  return target;
+}
+
 std::string get_command_from_pid(pid_t pid) {
   // Called from both the event thread and the full scan.
   static std::atomic<std::uint32_t> exe_fail_count = 0;
@@ -238,6 +273,16 @@ std::string get_command_from_pid(pid_t pid) {
     std::vector<std::string> cmdline = process_info::get_cmdline_from_pid(pid);
     // An empty argv[0] (exec -a '' ...) carries no name: use the exe link.
     if (!cmdline.empty() && !cmdline[0].empty()) {
+      // Rewritten process title: name the program, not the whole sentence.
+      // /proc/PID/exe is only read when the title starts with a path.
+      if (const auto space = cmdline[0].find(' '); space != std::string::npos) {
+        const bool path_head =
+            cmdline[0].find('/') < space && !cmdline[0].ends_with(".exe");
+        if (auto name = title_program_name(
+                cmdline[0], path_head ? exe_target(pid) : std::string{}))
+          return *std::move(name);
+      }
+
       // Wine/Proton processes show the Windows path of the image as argv[0]
       // (e.g. "C:\\Games\\game.exe"), so split on backslashes as well.
       // Done here so the full scan and the netlink backend match .exe rules

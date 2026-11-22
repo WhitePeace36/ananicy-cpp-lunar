@@ -12,12 +12,24 @@
 #endif
 #include "utility/synchronized_queue.hpp"
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 pid_t get_pid();
 
 std::string get_command_from_pid(pid_t pid);
+
+// Programs that rewrite their process title (setproctitle: Chromium, avahi,
+// sshd, postgres, ...) put a whole sentence into argv[0]; its first word is
+// the program: "/opt/brave-bin/brave --type=zygote ..." -> "brave",
+// "avahi-daemon: running [host]" -> "avahi-daemon". A first word that is a
+// path only counts if its file name is that of the executable (exe_path, the
+// target of /proc/PID/exe), so a real path with spaces ("/games/My Game/game") is left
+// alone. nullopt: argv0 is not such a title, use its file name as before.
+std::optional<std::string> title_program_name(std::string_view argv0,
+                                              std::string_view exe_path);
 
 struct Process {
   pid_t       pid{};
