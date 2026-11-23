@@ -278,9 +278,25 @@ std::string get_command_from_pid(pid_t pid) {
       if (const auto space = cmdline[0].find(' '); space != std::string::npos) {
         const bool path_head =
             cmdline[0].find('/') < space && !cmdline[0].ends_with(".exe");
-        if (auto name = title_program_name(
-                cmdline[0], path_head ? exe_target(pid) : std::string{}))
+        const std::string exe = path_head ? exe_target(pid) : std::string{};
+        if (auto name = title_program_name(cmdline[0], exe))
           return *std::move(name);
+        if (path_head) {
+          // Never name it after the last '/' of the whole title: with the
+          // start parameters joined into argv[0], that is somewhere inside
+          // them ("--log-file=/var/log/x.log" -> "x.log").
+          const std::string_view argv0{cmdline[0]};
+          const std::string_view head = argv0.substr(0, space);
+          std::error_code        ec;
+          // launched through a symlink with another name: same name as
+          // when the title is not rewritten
+          if (!exe.empty() && fs::equivalent(fs::path{head}, fs::path{exe}, ec))
+            return std::string{head.substr(head.find_last_of('/') + 1)};
+          // the binary's own path, spaces included ("/opt/My Apps/app --x")
+          if (!exe.empty() && argv0.starts_with(exe) &&
+              (argv0.size() == exe.size() || argv0[exe.size()] == ' '))
+            return exe.substr(exe.find_last_of('/') + 1);
+        }
       }
 
       // Wine/Proton processes show the Windows path of the image as argv[0]
